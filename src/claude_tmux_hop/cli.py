@@ -145,6 +145,7 @@ def cmd_picker(args: argparse.Namespace) -> int:
             cmd = f"select-pane -t {shlex.quote(pane.id)}"
 
         menu_items.append(label)
+        menu_items.append("")  # Key shortcut (empty = none)
         menu_items.append(cmd)
 
     # Display menu
