@@ -200,9 +200,12 @@ def cmd_list(args: argparse.Namespace) -> int:
     log_info(f"list: found {len(panes)} panes")
     sorted_panes = sort_all_panes(panes)
 
+    from datetime import datetime
+
     for pane in sorted_panes:
         project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
-        print(f"{pane.state:8} {pane.id:6} {pane.session}:{pane.window}  {project}")
+        ts = datetime.fromtimestamp(pane.timestamp).strftime("%H:%M:%S") if pane.timestamp else "——:——:——"
+        print(f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {project}")
 
     return 0
 
