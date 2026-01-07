@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "claude-tmux-hop"
+version = "0.1.0"
+description = "Hop between Claude Code sessions in tmux panes"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "unsafe9" }
+]
+keywords = ["tmux", "claude", "claude-code"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/unsafe9/claude-tmux-hop"
+Repository = "https://github.com/unsafe9/claude-tmux-hop"
+Issues = "https://github.com/unsafe9/claude-tmux-hop/issues"
+
+[project.scripts]
+claude-tmux-hop = "claude_tmux_hop.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/claude_tmux_hop"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+]

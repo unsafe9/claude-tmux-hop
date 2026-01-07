@@ -1,0 +1,64 @@
+{
+  "name": "claude-tmux-hop",
+  "description": "Track Claude Code sessions in tmux for quick navigation",
+  "version": "0.1.0",
+  "author": {
+    "name": "unsafe9"
+  },
+  "repository": "https://github.com/unsafe9/claude-tmux-hop",
+  "license": "MIT",
+  "keywords": ["tmux", "navigation", "sessions"],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx claude-tmux-hop init"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx claude-tmux-hop register --state active"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt|permission_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx claude-tmux-hop register --state waiting"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx claude-tmux-hop register --state idle"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx claude-tmux-hop clear"
+          }
+        ]
+      }
+    ]
+  }
+}
