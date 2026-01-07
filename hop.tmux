@@ -3,6 +3,8 @@
 # claude-tmux-hop - TPM plugin for hopping between Claude Code sessions
 #
 
+CURRENT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
 # Get tmux option with default value
 get_tmux_option() {
     local option="$1"
@@ -20,14 +22,18 @@ main() {
     cycle_key=$(get_tmux_option @hop-cycle-key "Tab")
     picker_key=$(get_tmux_option @hop-picker-key "C-Tab")
 
-    # Bind cycle key (uvx always uses latest from PyPI)
-    tmux bind-key "$cycle_key" run-shell "uvx claude-tmux-hop cycle"
+    # Wrapper script respects @hop-dev-path for local development, otherwise uses uvx
+    local cmd="$CURRENT_DIR/bin/claude-tmux-hop"
+
+    # Bind cycle key
+    # Pass pane_id via tmux variable substitution since run-shell doesn't preserve pane context
+    tmux bind-key "$cycle_key" run-shell "$cmd cycle --pane '#{pane_id}'"
 
     # Bind picker key
-    tmux bind-key "$picker_key" run-shell "uvx claude-tmux-hop picker"
+    tmux bind-key "$picker_key" run-shell "$cmd picker"
 
     # Auto-discover existing Claude Code sessions (skips already registered panes)
-    uvx claude-tmux-hop discover --quiet &
+    $cmd discover --quiet &
 }
 
 main

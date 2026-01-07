@@ -84,7 +84,7 @@ def cmd_clear(args: argparse.Namespace) -> int:
 
 def cmd_cycle(args: argparse.Namespace) -> int:
     """Cycle to the next pane in priority order."""
-    log_cli_call("cycle")
+    log_cli_call("cycle", {"pane": args.pane} if args.pane else None)
 
     if not is_in_tmux():
         log_error("cycle: not in tmux")
@@ -105,7 +105,8 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         return 0
 
     # Find current pane and select next
-    current = get_current_pane()
+    # Prefer --pane arg (from tmux keybinding), fall back to get_current_pane()
+    current = args.pane if args.pane else get_current_pane()
     ids = [p.id for p in group]
 
     try:
@@ -302,6 +303,11 @@ def main() -> int:
     cycle_parser = subparsers.add_parser(
         "cycle",
         help="Cycle to next pane in priority order",
+    )
+    cycle_parser.add_argument(
+        "--pane",
+        "-p",
+        help="Current pane ID (passed by tmux keybinding)",
     )
     cycle_parser.set_defaults(func=cmd_cycle)
 
