@@ -59,9 +59,6 @@ set -g @hop-cycle-key 'Tab'
 
 # Customize picker key (default: C-Tab)
 set -g @hop-picker-key 'C-Tab'
-
-# Enable picker menu (default: off)
-set -g @hop-enable-picker 'on'
 ```
 
 ### CLI Commands
