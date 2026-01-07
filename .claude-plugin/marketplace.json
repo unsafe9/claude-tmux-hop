@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "claude-tmux-hop",
-      "source": "./claude-plugin",
+      "source": "./",
       "description": "Track Claude Code sessions in tmux for quick navigation",
       "version": "0.1.0",
       "author": {

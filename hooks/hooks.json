@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx claude-tmux-hop init"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop init"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx claude-tmux-hop register --state active"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx claude-tmux-hop register --state waiting"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting"
           }
         ]
       }
@@ -38,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx claude-tmux-hop register --state waiting"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting"
           }
         ]
       }
@@ -48,7 +48,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx claude-tmux-hop register --state idle"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle"
           }
         ]
       }
@@ -58,7 +58,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx claude-tmux-hop clear"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop clear"
           }
         ]
       }

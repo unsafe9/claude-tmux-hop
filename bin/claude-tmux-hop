@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Wrapper that uses @hop-dev-path if set, otherwise uvx
+
+dev_path=$(tmux show-option -gqv @hop-dev-path 2>/dev/null)
+
+if [[ -n "$dev_path" ]]; then
+    exec uv run --project "$dev_path" claude-tmux-hop "$@"
+else
+    exec uvx claude-tmux-hop "$@"
+fi
