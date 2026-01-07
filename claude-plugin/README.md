@@ -15,7 +15,7 @@ This plugin registers hooks that track the state of Claude Code sessions:
 | Hook | State | When |
 |------|-------|------|
 | `UserPromptSubmit` | `active` | User submits a prompt |
-| `Notification` (idle_prompt/permission_prompt) | `waiting` | Claude needs input |
+| `Notification` (permission_prompt) | `waiting` | Claude needs input |
 | `Stop` | `idle` | Claude finishes a task |
 | `SessionEnd` | (cleared) | Claude Code exits |
 

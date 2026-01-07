@@ -89,7 +89,7 @@ uvx claude-tmux-hop discover --dry-run
 
 | State | Trigger | Priority |
 |-------|---------|----------|
-| `waiting` | Notification hook (idle/permission prompt) | Highest |
+| `waiting` | Notification hook (permission prompt) | Highest |
 | `idle` | Stop hook (task complete) | Medium |
 | `active` | UserPromptSubmit hook | Lowest |
 
