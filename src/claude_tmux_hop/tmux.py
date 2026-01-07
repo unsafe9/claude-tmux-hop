@@ -119,6 +119,48 @@ def clear_pane_state(pane_id: str | None = None) -> None:
         run_tmux("set-option", "-p", "-u", "@hop-timestamp", check=False)
 
 
+def get_claude_panes_by_process() -> list[dict]:
+    """Find all panes running Claude Code by checking process name.
+
+    Claude Code shows as a semver version (e.g., "2.0.76") in pane_current_command.
+
+    Returns:
+        List of dicts with pane info for each Claude pane found.
+    """
+    import re
+
+    output = run_tmux(
+        "list-panes",
+        "-a",
+        "-F",
+        "#{pane_id}\t#{pane_current_command}\t#{pane_current_path}\t#{session_name}\t#{window_index}",
+    )
+
+    panes = []
+    semver_pattern = re.compile(r"^\d+\.\d+\.\d+$")
+
+    for line in output.split("\n"):
+        if not line:
+            continue
+
+        parts = line.split("\t")
+        if len(parts) < 5:
+            continue
+
+        pane_id, command, cwd, session, window_str = parts
+
+        if semver_pattern.match(command):
+            panes.append({
+                "id": pane_id,
+                "command": command,
+                "cwd": cwd,
+                "session": session,
+                "window": int(window_str) if window_str else 0,
+            })
+
+    return panes
+
+
 def get_hop_panes() -> list[PaneInfo]:
     """Get all panes with hop state set and marked as Claude panes.
 

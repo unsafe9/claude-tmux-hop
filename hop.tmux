@@ -31,6 +31,9 @@ main() {
             tmux bind-key "$picker_key" run-shell "uvx claude-tmux-hop picker"
             ;;
     esac
+
+    # Auto-discover existing Claude Code sessions (skips already registered panes)
+    uvx claude-tmux-hop discover --quiet &
 }
 
 main

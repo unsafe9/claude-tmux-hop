@@ -6,6 +6,7 @@ Quickly hop between Claude Code sessions running in tmux panes.
 
 - **Priority-based cycling**: Jump to panes waiting for input first, then idle, then active
 - **Auto-registration**: Claude Code hooks automatically track pane states
+- **Auto-discovery**: Existing Claude Code sessions are detected on plugin load
 - **In-memory state**: Uses tmux pane options - no files, auto-cleanup when panes close
 - **Cross-session navigation**: Works across all tmux sessions
 
@@ -36,6 +37,8 @@ set -g @plugin 'unsafe9/claude-tmux-hop'
 Then press `prefix + I` to install.
 
 That's it! The CLI runs via `uvx` automatically - no manual Python installation needed.
+
+Any existing Claude Code sessions will be automatically discovered and registered as `idle` on plugin load.
 
 ## Usage
 
@@ -72,6 +75,12 @@ uvx claude-tmux-hop cycle
 
 # Show picker menu
 uvx claude-tmux-hop picker
+
+# Discover existing Claude Code sessions (runs automatically on plugin load)
+uvx claude-tmux-hop discover
+
+# Preview what would be discovered
+uvx claude-tmux-hop discover --dry-run
 ```
 
 ## How It Works

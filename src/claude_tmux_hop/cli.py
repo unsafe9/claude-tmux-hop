@@ -25,6 +25,7 @@ def _escape_tmux_label(s: str) -> str:
 
 from .tmux import (
     clear_pane_state,
+    get_claude_panes_by_process,
     get_current_pane,
     get_hop_panes,
     init_pane,
@@ -176,6 +177,50 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_discover(args: argparse.Namespace) -> int:
+    """Discover and register existing Claude Code sessions as idle."""
+    if not is_in_tmux():
+        print("Error: Not running inside tmux", file=sys.stderr)
+        return 1
+
+    claude_panes = get_claude_panes_by_process()
+
+    if not claude_panes:
+        if not args.quiet:
+            print("No Claude Code sessions found")
+        return 0
+
+    registered = 0
+    skipped = 0
+
+    for pane in claude_panes:
+        pane_id = pane["id"]
+
+        # Skip already registered panes unless --force
+        if is_claude_pane(pane_id) and not args.force:
+            skipped += 1
+            continue
+
+        project = os.path.basename(pane["cwd"]) if pane["cwd"] else "unknown"
+
+        if args.dry_run:
+            print(f"Would register: {pane_id} ({pane['session']}:{pane['window']}) - {project}")
+        else:
+            init_pane(pane_id)
+            set_pane_state("idle", pane_id)
+            if not args.quiet:
+                print(f"Registered: {pane_id} ({pane['session']}:{pane['window']}) - {project}")
+
+        registered += 1
+
+    if not args.dry_run and not args.quiet:
+        print(f"\nDiscovered {registered} session(s)")
+        if skipped > 0:
+            print(f"Skipped {skipped} already registered session(s)")
+
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -238,6 +283,31 @@ def main() -> int:
         help="List all Claude Code panes",
     )
     list_parser.set_defaults(func=cmd_list)
+
+    # discover command
+    discover_parser = subparsers.add_parser(
+        "discover",
+        help="Discover and register existing Claude Code sessions",
+    )
+    discover_parser.add_argument(
+        "--dry-run",
+        "-n",
+        action="store_true",
+        help="Show what would be registered without making changes",
+    )
+    discover_parser.add_argument(
+        "--force",
+        "-f",
+        action="store_true",
+        help="Re-register panes that are already registered",
+    )
+    discover_parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress output except errors",
+    )
+    discover_parser.set_defaults(func=cmd_discover)
 
     args = parser.parse_args()
     return args.func(args)
