@@ -8,6 +8,7 @@ import shlex
 import sys
 
 from . import __version__
+from .log import log_cli_call, log_error, log_info
 from .priority import VALID_STATES, get_cycle_group, sort_all_panes
 
 
@@ -39,52 +40,67 @@ from .tmux import (
 
 def cmd_init(args: argparse.Namespace) -> int:
     """Initialize the current pane as a Claude Code pane."""
+    log_cli_call("init")
+
     if not is_in_tmux():
-        # Silently exit if not in tmux
+        log_info("init: not in tmux, skipping")
         return 0
 
     init_pane()
+    log_info("init: pane initialized")
     return 0
 
 
 def cmd_register(args: argparse.Namespace) -> int:
     """Register the current pane with a state."""
+    log_cli_call("register", {"state": args.state})
+
     if not is_in_tmux():
-        # Silently exit if not in tmux
+        log_info(f"register: not in tmux, skipping")
         return 0
 
     # Only register if this pane was initialized by Claude Code
     if not is_claude_pane():
+        log_info(f"register: pane not initialized as claude pane, skipping")
         return 0
 
     set_pane_state(args.state)
+    log_info(f"register: state set to {args.state}")
     return 0
 
 
 def cmd_clear(args: argparse.Namespace) -> int:
     """Clear the hop state from the current pane."""
+    log_cli_call("clear")
+
     if not is_in_tmux():
-        # Silently exit if not in tmux
+        log_info("clear: not in tmux, skipping")
         return 0
 
     clear_pane_state()
+    log_info("clear: state cleared")
     return 0
 
 
 def cmd_cycle(args: argparse.Namespace) -> int:
     """Cycle to the next pane in priority order."""
+    log_cli_call("cycle")
+
     if not is_in_tmux():
+        log_error("cycle: not in tmux")
         print("Error: Not running inside tmux", file=sys.stderr)
         return 1
 
     panes = get_hop_panes()
     if not panes:
+        log_info("cycle: no panes found")
         run_tmux("display-message", "No Claude Code sessions found")
         return 0
 
     # Get the group to cycle through
     group = get_cycle_group(panes)
     if not group:
+        log_info("cycle: no group found")
         run_tmux("display-message", "No Claude Code sessions found")
         return 0
 
@@ -100,20 +116,27 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         next_idx = 0
 
     target = group[next_idx]
+    log_info(f"cycle: switching from {current} to {target.id} ({target.state})")
     switch_to_pane(target.id, target.session)
     return 0
 
 
 def cmd_picker(args: argparse.Namespace) -> int:
     """Show a picker menu for all Claude Code panes."""
+    log_cli_call("picker")
+
     if not is_in_tmux():
+        log_error("picker: not in tmux")
         print("Error: Not running inside tmux", file=sys.stderr)
         return 1
 
     panes = get_hop_panes()
     if not panes:
+        log_info("picker: no panes found")
         run_tmux("display-message", "No Claude Code sessions found")
         return 0
+
+    log_info(f"picker: showing {len(panes)} panes")
 
     # Sort panes for display
     sorted_panes = sort_all_panes(panes)
@@ -160,15 +183,20 @@ def cmd_picker(args: argparse.Namespace) -> int:
 
 def cmd_list(args: argparse.Namespace) -> int:
     """List all Claude Code panes with their state."""
+    log_cli_call("list")
+
     if not is_in_tmux():
+        log_error("list: not in tmux")
         print("Error: Not running inside tmux", file=sys.stderr)
         return 1
 
     panes = get_hop_panes()
     if not panes:
+        log_info("list: no panes found")
         print("No Claude Code sessions found")
         return 0
 
+    log_info(f"list: found {len(panes)} panes")
     sorted_panes = sort_all_panes(panes)
 
     for pane in sorted_panes:
@@ -180,17 +208,22 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 def cmd_discover(args: argparse.Namespace) -> int:
     """Discover and register existing Claude Code sessions as idle."""
+    log_cli_call("discover", {"dry_run": args.dry_run, "force": args.force})
+
     if not is_in_tmux():
+        log_error("discover: not in tmux")
         print("Error: Not running inside tmux", file=sys.stderr)
         return 1
 
     claude_panes = get_claude_panes_by_process()
 
     if not claude_panes:
+        log_info("discover: no claude panes found by process")
         if not args.quiet:
             print("No Claude Code sessions found")
         return 0
 
+    log_info(f"discover: found {len(claude_panes)} claude panes by process")
     registered = 0
     skipped = 0
 
@@ -209,6 +242,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         else:
             init_pane(pane_id)
             set_pane_state("idle", pane_id)
+            log_info(f"discover: registered {pane_id} as idle")
             if not args.quiet:
                 print(f"Registered: {pane_id} ({pane['session']}:{pane['window']}) - {project}")
 

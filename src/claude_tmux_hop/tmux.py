@@ -7,6 +7,8 @@ import subprocess
 import time
 from dataclasses import dataclass
 
+from .log import log_debug, log_error
+
 
 @dataclass
 class PaneInfo:
@@ -33,9 +35,15 @@ def run_tmux(*args: str, check: bool = True) -> str:
             text=True,
             check=check,
         )
-        return result.stdout.strip()
+        output = result.stdout.strip()
+        # Log non-query commands (skip list-panes, show-option, display-message -p)
+        cmd = args[0] if args else ""
+        if cmd not in ("list-panes", "show-option", "display-message"):
+            log_debug(f"tmux {' '.join(args[:3])}...")
+        return output
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.strip() if e.stderr else "No error message"
+        log_error(f"tmux failed: {' '.join(args[:3])}... -> {stderr}")
         raise RuntimeError(
             f"tmux command failed: tmux {' '.join(args)}\nError: {stderr}"
         ) from e
