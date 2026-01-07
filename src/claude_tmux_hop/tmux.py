@@ -50,8 +50,16 @@ def run_tmux(*args: str, check: bool = True) -> str:
 
 
 def get_current_pane() -> str | None:
-    """Get the current pane ID from environment."""
-    return os.environ.get("TMUX_PANE")
+    """Get the current pane ID from tmux.
+
+    Uses tmux display-message to get the active pane, which works correctly
+    even when called from keybindings (where TMUX_PANE env var is not set).
+    """
+    try:
+        result = run_tmux("display-message", "-p", "#{pane_id}")
+        return result if result else None
+    except RuntimeError:
+        return None
 
 
 def is_in_tmux() -> bool:
