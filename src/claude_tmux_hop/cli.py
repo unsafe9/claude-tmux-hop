@@ -119,7 +119,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     target = group[next_idx]
     project = os.path.basename(target.cwd) if target.cwd else "?"
     log_info(f"cycle → {target.session}:{target.window} {project} ({target.state})")
-    switch_to_pane(target.id, target.session)
+    switch_to_pane(target.id, target.session, target.window)
     return 0
 
 
@@ -163,9 +163,10 @@ def cmd_picker(args: argparse.Namespace) -> int:
         label = f"{icon} {safe_project} ({safe_session}:{pane.window})"
 
         # Command to switch to this pane (handle cross-session)
-        # Use shlex.quote() for pane.id and pane.session in shell commands
+        # Use shlex.quote() for pane.id and session:window in shell commands
         if pane.session != current_session:
-            cmd = f"switch-client -t {shlex.quote(pane.session)} ; select-pane -t {shlex.quote(pane.id)}"
+            target = f"{pane.session}:{pane.window}"
+            cmd = f"switch-client -t {shlex.quote(target)} ; select-pane -t {shlex.quote(pane.id)}"
         else:
             cmd = f"select-pane -t {shlex.quote(pane.id)}"
 

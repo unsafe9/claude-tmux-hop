@@ -228,12 +228,13 @@ def get_hop_panes() -> list[PaneInfo]:
     return panes
 
 
-def switch_to_pane(pane_id: str, target_session: str | None = None) -> bool:
+def switch_to_pane(pane_id: str, target_session: str | None = None, target_window: int | None = None) -> bool:
     """Switch to a pane, handling cross-session navigation.
 
     Args:
         pane_id: The target pane ID (e.g., "%99")
         target_session: The session name (optional, will be looked up if not provided)
+        target_window: The window index (optional, used for cross-session switches)
 
     Returns:
         True if switch was successful, False if pane not found
@@ -244,15 +245,16 @@ def switch_to_pane(pane_id: str, target_session: str | None = None) -> bool:
             "list-panes",
             "-a",
             "-F",
-            "#{pane_id}\t#{session_name}",
+            "#{pane_id}\t#{session_name}\t#{window_index}",
         )
 
         for line in output.split("\n"):
             if not line:
                 continue
             parts = line.split("\t")
-            if len(parts) >= 2 and parts[0] == pane_id:
+            if len(parts) >= 3 and parts[0] == pane_id:
                 target_session = parts[1]
+                target_window = int(parts[2]) if parts[2] else None
                 break
 
         if not target_session:
@@ -267,7 +269,11 @@ def switch_to_pane(pane_id: str, target_session: str | None = None) -> bool:
 
     # Switch session if needed, then select the pane
     if target_session != current_session:
-        run_tmux("switch-client", "-t", target_session)
+        # Switch to session:window to land on the correct window
+        if target_window is not None:
+            run_tmux("switch-client", "-t", f"{target_session}:{target_window}")
+        else:
+            run_tmux("switch-client", "-t", target_session)
         run_tmux("select-pane", "-t", pane_id)
     else:
         run_tmux("select-pane", "-t", pane_id)
