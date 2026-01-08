@@ -70,7 +70,7 @@ def sort_within_group(panes: list[PaneInfo], state: str) -> list[PaneInfo]:
         return sorted(panes, key=lambda p: -p.timestamp)
 
 
-def get_cycle_group(panes: list[PaneInfo]) -> list[PaneInfo]:
+def get_cycle_group(panes: list[PaneInfo], expand: bool = False) -> list[PaneInfo]:
     """Get the highest-priority non-empty group for cycling.
 
     Cycling behavior:
@@ -80,20 +80,32 @@ def get_cycle_group(panes: list[PaneInfo]) -> list[PaneInfo]:
 
     Args:
         panes: All panes with hop state
+        expand: If True and only 1 pane in group, include next priority group
 
     Returns:
         Sorted list of panes to cycle through
     """
     groups = group_by_state(panes)
 
-    if groups["waiting"]:
-        return sort_within_group(groups["waiting"], "waiting")
-    elif groups["idle"]:
-        return sort_within_group(groups["idle"], "idle")
-    elif groups["active"]:
-        return sort_within_group(groups["active"], "active")
+    if expand:
+        # Expand to include multiple groups until we have 2+ panes
+        result: list[PaneInfo] = []
+        for state in ["waiting", "idle", "active"]:
+            if groups[state]:
+                result.extend(sort_within_group(groups[state], state))
+                if len(result) >= 2:
+                    break
+        return result
     else:
-        return []
+        # Default: cycle within single highest-priority group
+        if groups["waiting"]:
+            return sort_within_group(groups["waiting"], "waiting")
+        elif groups["idle"]:
+            return sort_within_group(groups["idle"], "idle")
+        elif groups["active"]:
+            return sort_within_group(groups["active"], "active")
+        else:
+            return []
 
 
 def sort_all_panes(panes: list[PaneInfo]) -> list[PaneInfo]:

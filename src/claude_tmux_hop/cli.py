@@ -98,7 +98,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         return 0
 
     # Get the group to cycle through
-    group = get_cycle_group(panes)
+    group = get_cycle_group(panes, expand=args.expand)
     if not group:
         log_info("cycle: no group found")
         run_tmux("display-message", "No Claude Code sessions found")
@@ -313,6 +313,12 @@ def main() -> int:
         "--pane",
         "-p",
         help="Current pane ID (passed by tmux keybinding)",
+    )
+    cycle_parser.add_argument(
+        "--expand",
+        "-e",
+        action="store_true",
+        help="Expand to next priority group if only 1 pane in current group",
     )
     cycle_parser.set_defaults(func=cmd_cycle)
 
