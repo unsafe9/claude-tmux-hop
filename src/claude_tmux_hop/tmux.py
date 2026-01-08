@@ -69,9 +69,27 @@ def is_in_tmux() -> bool:
     return "TMUX" in os.environ
 
 
+def _get_pane_id(pane_id: str | None) -> str | None:
+    """Get pane ID, defaulting to TMUX_PANE env var.
+
+    Args:
+        pane_id: Explicit pane ID, or None to use TMUX_PANE env var
+
+    Returns:
+        The pane ID to use, or None if not available
+    """
+    if pane_id is not None:
+        return pane_id
+    return os.environ.get("TMUX_PANE")
+
+
 def _pane_target_args(pane_id: str | None) -> list[str]:
-    """Return target args for pane option commands."""
-    return ["-t", pane_id] if pane_id else []
+    """Return target args for pane option commands.
+
+    Uses TMUX_PANE env var if pane_id is None.
+    """
+    resolved = _get_pane_id(pane_id)
+    return ["-t", resolved] if resolved else []
 
 
 def set_pane_state(state: str, pane_id: str | None = None) -> None:
