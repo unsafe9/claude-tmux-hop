@@ -148,8 +148,11 @@ def cmd_picker(args: argparse.Namespace) -> int:
     # Sort panes for display
     sorted_panes = sort_all_panes(panes)
 
-    # Get current session for cross-session switching
-    current_session = run_tmux("display-message", "-p", "#{session_name}")
+    # Get current session and window for cross-session/window switching
+    current_info = run_tmux("display-message", "-p", "#{session_name}\t#{window_index}")
+    parts = current_info.split("\t")
+    current_session = parts[0] if parts else ""
+    current_window = int(parts[1]) if len(parts) > 1 and parts[1] else None
 
     # Build menu items
     menu_items = []
@@ -167,12 +170,18 @@ def cmd_picker(args: argparse.Namespace) -> int:
         # Menu entry: "icon project (session:window)"
         label = f"{icon} {safe_project} ({safe_session}:{pane.window})"
 
-        # Command to switch to this pane (handle cross-session)
+        # Command to switch to this pane (handle cross-session and cross-window)
         # Use shlex.quote() for pane.id and session:window in shell commands
         if pane.session != current_session:
+            # Different session: switch-client to session:window
             target = f"{pane.session}:{pane.window}"
             cmd = f"switch-client -t {shlex.quote(target)} ; select-pane -t {shlex.quote(pane.id)}"
+        elif pane.window != current_window:
+            # Same session, different window: select-window first
+            target = f"{pane.session}:{pane.window}"
+            cmd = f"select-window -t {shlex.quote(target)} ; select-pane -t {shlex.quote(pane.id)}"
         else:
+            # Same session and window: just select-pane
             cmd = f"select-pane -t {shlex.quote(pane.id)}"
 
         menu_items.append(label)

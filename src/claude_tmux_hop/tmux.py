@@ -273,12 +273,12 @@ def get_stale_panes() -> list[PaneInfo]:
 
 
 def switch_to_pane(pane_id: str, target_session: str | None = None, target_window: int | None = None) -> bool:
-    """Switch to a pane, handling cross-session navigation.
+    """Switch to a pane, handling cross-session and cross-window navigation.
 
     Args:
         pane_id: The target pane ID (e.g., "%99")
         target_session: The session name (optional, will be looked up if not provided)
-        target_window: The window index (optional, used for cross-session switches)
+        target_window: The window index (optional, used for cross-session/window switches)
 
     Returns:
         True if switch was successful, False if pane not found
@@ -308,18 +308,24 @@ def switch_to_pane(pane_id: str, target_session: str | None = None, target_windo
             )
             return False
 
-    # Get current session
-    current_session = run_tmux("display-message", "-p", "#{session_name}")
+    # Get current session and window
+    current_info = run_tmux("display-message", "-p", "#{session_name}\t#{window_index}")
+    parts = current_info.split("\t")
+    current_session = parts[0] if parts else ""
+    current_window = int(parts[1]) if len(parts) > 1 and parts[1] else None
 
-    # Switch session if needed, then select the pane
+    # Switch session/window as needed, then select the pane
     if target_session != current_session:
-        # Switch to session:window to land on the correct window
+        # Different session: switch-client to session:window
         if target_window is not None:
             run_tmux("switch-client", "-t", f"{target_session}:{target_window}")
         else:
             run_tmux("switch-client", "-t", target_session)
-        run_tmux("select-pane", "-t", pane_id)
-    else:
-        run_tmux("select-pane", "-t", pane_id)
+    elif target_window is not None and target_window != current_window:
+        # Same session, different window: select-window first
+        run_tmux("select-window", "-t", f"{target_session}:{target_window}")
+
+    # Select the pane
+    run_tmux("select-pane", "-t", pane_id)
 
     return True
