@@ -33,10 +33,10 @@ def get_logger() -> logging.Logger:
         handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
         handler.setLevel(logging.DEBUG)
 
-        # Format: timestamp | pane | project | level | message
+        # Format: time | pane | project | message
         formatter = logging.Formatter(
-            "%(asctime)s | %(pane)-6s | %(project)-20s | %(levelname)-5s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
+            "%(asctime)s | %(pane)-5s | %(project)-16s | %(message)s",
+            datefmt="%H:%M:%S",
         )
         handler.setFormatter(formatter)
         _logger.addHandler(handler)

@@ -117,7 +117,8 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         next_idx = 0
 
     target = group[next_idx]
-    log_info(f"cycle: switching from {current} to {target.id} ({target.state})")
+    project = os.path.basename(target.cwd) if target.cwd else "?"
+    log_info(f"cycle → {target.session}:{target.window} {project} ({target.state})")
     switch_to_pane(target.id, target.session)
     return 0
 
