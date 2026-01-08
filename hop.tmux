@@ -39,6 +39,10 @@ main() {
 
     # Auto-discover existing Claude Code sessions (skips already registered panes)
     $cmd discover --quiet &
+
+    # Set up status format for use in status-left/status-right
+    # Users can use #{E:@hop-status} in their tmux config
+    tmux set-option -g @hop-status "#($cmd status)"
 }
 
 main

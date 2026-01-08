@@ -10,7 +10,7 @@ from datetime import datetime
 
 from . import __version__
 from .log import log_cli_call, log_error, log_info
-from .priority import STATE_PRIORITY, VALID_CYCLE_MODES, VALID_STATES, get_cycle_group, sort_all_panes
+from .priority import STATE_PRIORITY, VALID_CYCLE_MODES, VALID_STATES, get_cycle_group, group_by_state, sort_all_panes
 from .tmux import (
     clear_pane_state,
     get_claude_panes_by_process,
@@ -206,8 +206,8 @@ def cmd_picker(args: argparse.Namespace) -> int:
     # Build menu items
     menu_items = []
     for pane in sorted_panes:
-        # State icon
-        icon = {"waiting": "[W]", "idle": "[I]", "active": "[A]"}.get(pane.state, "[?]")
+        # State icon (nerd font - Material Design)
+        icon = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}.get(pane.state, "?")
 
         # Project name from cwd
         project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
@@ -358,6 +358,36 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_status(args: argparse.Namespace) -> int:
+    """Output status bar string for tmux integration."""
+    # Don't log to avoid overhead in polling scenario
+
+    if not is_in_tmux():
+        return 0  # Silent exit, no output
+
+    # Get panes without validation for speed
+    panes = get_hop_panes(validate=False)
+
+    # Group by state
+    groups = group_by_state(panes)
+    waiting_count = len(groups["waiting"])
+    idle_count = len(groups["idle"])
+
+    # Early exit if nothing to show
+    if waiting_count == 0 and idle_count == 0:
+        return 0  # Empty output
+
+    # Format: "󰂜 2 󰄬 1" (nerd font icons - Material Design, only non-zero counts)
+    parts = []
+    if waiting_count > 0:
+        parts.append(f"󰂜 {waiting_count}")  # nf-md-bell_ring
+    if idle_count > 0:
+        parts.append(f"󰄬 {idle_count}")  # nf-md-check
+
+    print(" ".join(parts), end="")
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -469,6 +499,13 @@ def main() -> int:
         help="Suppress output except errors",
     )
     prune_parser.set_defaults(func=cmd_prune)
+
+    # status command
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Output status for tmux status bar",
+    )
+    status_parser.set_defaults(func=cmd_status)
 
     args = parser.parse_args()
     return args.func(args)

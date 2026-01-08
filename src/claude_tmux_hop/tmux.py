@@ -50,6 +50,23 @@ def run_tmux(*args: str, check: bool = True) -> str:
         ) from e
 
 
+def get_tmux_option(option: str, default: str = "") -> str:
+    """Get a tmux option value with fallback.
+
+    Args:
+        option: The tmux option name (e.g., "@hop-status-format")
+        default: Default value if option is not set
+
+    Returns:
+        The option value or default
+    """
+    try:
+        result = run_tmux("show-option", "-gqv", option, check=False)
+        return result if result else default
+    except RuntimeError:
+        return default
+
+
 def get_current_pane() -> str | None:
     """Get the current pane ID from tmux.
 
