@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop init"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle"
           }
         ]
       }

@@ -18,8 +18,7 @@ from .tmux import (
     get_current_session_window,
     get_hop_panes,
     get_stale_panes,
-    init_pane,
-    is_claude_pane,
+    has_hop_state,
     is_in_tmux,
     run_tmux,
     set_pane_state,
@@ -39,30 +38,12 @@ def _escape_tmux_label(s: str) -> str:
     return s
 
 
-def cmd_init(args: argparse.Namespace) -> int:
-    """Initialize the current pane as a Claude Code pane."""
-    log_cli_call("init")
-
-    if not is_in_tmux():
-        log_info("init: not in tmux, skipping")
-        return 0
-
-    init_pane()
-    log_info("init: pane initialized")
-    return 0
-
-
 def cmd_register(args: argparse.Namespace) -> int:
     """Register the current pane with a state."""
     log_cli_call("register", {"state": args.state})
 
     if not is_in_tmux():
         log_info(f"register: not in tmux, skipping")
-        return 0
-
-    # Only register if this pane was initialized by Claude Code
-    if not is_claude_pane():
-        log_info(f"register: pane not initialized as claude pane, skipping")
         return 0
 
     set_pane_state(args.state)
@@ -247,7 +228,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
         pane_id = pane["id"]
 
         # Skip already registered panes unless --force
-        if is_claude_pane(pane_id) and not args.force:
+        if has_hop_state(pane_id) and not args.force:
             skipped += 1
             continue
 
@@ -256,7 +237,6 @@ def cmd_discover(args: argparse.Namespace) -> int:
         if args.dry_run:
             print(f"Would register: {pane_id} ({pane['session']}:{pane['window']}) - {project}")
         else:
-            init_pane(pane_id)
             set_pane_state("idle", pane_id)
             log_info(f"discover: registered {pane_id} as idle")
             if not args.quiet:
@@ -321,13 +301,6 @@ def main() -> int:
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
-
-    # init command (called by SessionStart hook)
-    init_parser = subparsers.add_parser(
-        "init",
-        help="Initialize current pane as Claude Code pane",
-    )
-    init_parser.set_defaults(func=cmd_init)
 
     # register command
     register_parser = subparsers.add_parser(

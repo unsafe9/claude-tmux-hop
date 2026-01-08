@@ -32,7 +32,6 @@ hop.tmux          # TPM plugin entry point
 
 ```bash
 uvx claude-tmux-hop <command>
-  init                    # Mark pane as Claude Code pane
   register --state <s>    # Set state: waiting|idle|active
   clear                   # Remove hop state from pane
   cycle                   # Jump to next pane (priority order)
@@ -50,10 +49,10 @@ uvx claude-tmux-hop <command>
 - `active` (2): running - newest first
 
 ### Tmux State Storage
-Uses custom pane options: `@hop-claude`, `@hop-state`, `@hop-timestamp`
+Uses custom pane options: `@hop-state`, `@hop-timestamp`
 
 ### Hook Flow (hooks.json)
-- SessionStart → init
+- SessionStart → idle
 - UserPromptSubmit → active
 - PreToolUse (AskUserQuestion|ExitPlanMode) → waiting
 - PostToolUse → active (after user answers question or grants permission)

@@ -117,43 +117,30 @@ def set_pane_state(state: str, pane_id: str | None = None) -> None:
     run_tmux("set-option", "-p", *target, "@hop-timestamp", timestamp)
 
 
-def init_pane(pane_id: str | None = None) -> None:
-    """Initialize a pane as a Claude Code pane.
-
-    Sets a marker to indicate this pane has an active Claude Code session.
-
-    Args:
-        pane_id: The pane ID, or None for current pane
-    """
-    target = _pane_target_args(pane_id)
-    run_tmux("set-option", "-p", *target, "@hop-claude", "1")
-
-
-def is_claude_pane(pane_id: str | None = None) -> bool:
-    """Check if a pane is marked as a Claude Code pane.
+def has_hop_state(pane_id: str | None = None) -> bool:
+    """Check if a pane has hop state set.
 
     Args:
         pane_id: The pane ID, or None for current pane
 
     Returns:
-        True if the pane has the Claude marker set
+        True if the pane has hop state set
     """
     target = _pane_target_args(pane_id)
     try:
-        result = run_tmux("show-option", "-p", *target, "-qv", "@hop-claude", check=False)
-        return result == "1"
+        result = run_tmux("show-option", "-p", *target, "-qv", "@hop-state", check=False)
+        return bool(result)
     except RuntimeError:
         return False
 
 
 def clear_pane_state(pane_id: str | None = None) -> None:
-    """Clear the hop state and Claude marker from a pane.
+    """Clear the hop state from a pane.
 
     Args:
         pane_id: The pane ID, or None for current pane
     """
     target = _pane_target_args(pane_id)
-    run_tmux("set-option", "-p", *target, "-u", "@hop-claude", check=False)
     run_tmux("set-option", "-p", *target, "-u", "@hop-state", check=False)
     run_tmux("set-option", "-p", *target, "-u", "@hop-timestamp", check=False)
 
@@ -274,25 +261,25 @@ def get_claude_panes_by_process() -> list[dict]:
 
 
 def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
-    """Get all panes with hop state set and marked as Claude panes.
+    """Get all panes with hop state set.
 
     Args:
         validate: If True, filter out panes where Claude Code is no longer running.
                   Set to False for operations like prune that need to see stale panes.
 
     Returns:
-        List of PaneInfo objects for panes with hop state and Claude marker.
+        List of PaneInfo objects for panes with hop state.
     """
     # Get running Claude panes for validation
     running_pane_ids = get_running_claude_pane_ids() if validate else None
 
     # Query all panes with hop options
-    # Format: pane_id \t claude_marker \t state \t timestamp \t cwd \t session \t window
+    # Format: pane_id \t state \t timestamp \t cwd \t session \t window
     output = run_tmux(
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}\t#{@hop-claude}\t#{@hop-state}\t#{@hop-timestamp}\t#{pane_current_path}\t#{session_name}\t#{window_index}",
+        "#{pane_id}\t#{@hop-state}\t#{@hop-timestamp}\t#{pane_current_path}\t#{session_name}\t#{window_index}",
     )
 
     panes = []
@@ -301,13 +288,13 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
             continue
 
         parts = line.split("\t")
-        if len(parts) < 7:
+        if len(parts) < 6:
             continue
 
-        pane_id, claude_marker, state, timestamp_str, cwd, session, window_str = parts
+        pane_id, state, timestamp_str, cwd, session, window_str = parts
 
-        # Only include panes with Claude marker AND hop state
-        if claude_marker != "1" or not state:
+        # Only include panes with hop state
+        if not state:
             continue
 
         # Skip stale panes if validating
