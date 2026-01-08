@@ -51,6 +51,12 @@ uvx claude-tmux-hop <command>
 ### Tmux State Storage
 Uses custom pane options: `@hop-state`, `@hop-timestamp`
 
+### Auto-Hop (cli.py)
+Optional feature to auto-switch to panes on state change:
+- `@hop-auto`: comma-separated states to trigger (default: empty = disabled)
+- `@hop-auto-priority-only`: only hop if highest priority (default: "on")
+- Implemented in `should_auto_hop()` and `do_auto_hop()`, called from `cmd_register()`
+
 ### Hook Flow (hooks.json)
 - SessionStart → idle
 - UserPromptSubmit → active

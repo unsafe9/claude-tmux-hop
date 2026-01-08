@@ -5,6 +5,7 @@ Quickly hop between Claude Code sessions running in tmux panes.
 ## Features
 
 - **Priority-based cycling**: Jump to panes waiting for input first, then idle, then active
+- **Auto-hop**: Optionally auto-switch to panes when they need attention
 - **Auto-registration**: Claude Code hooks automatically track pane states
 - **Auto-discovery**: Existing Claude Code sessions are detected on plugin load
 - **In-memory state**: Uses tmux pane options - no files, auto-cleanup when panes close
@@ -64,6 +65,16 @@ set -g @hop-picker-key 'C-Space'
 # - priority: cycle within highest-priority group only
 # - flat: cycle through all panes in priority order
 set -g @hop-cycle-mode 'priority'
+
+# Auto-hop: automatically switch to panes when they enter specific states
+# Disabled by default. Set to comma-separated states to enable.
+set -g @hop-auto 'waiting'           # Auto-switch when a pane needs input
+# set -g @hop-auto 'waiting,idle'    # Also switch when tasks complete
+
+# Priority-only mode (default: on)
+# Only auto-hop if no other pane has equal or higher priority
+set -g @hop-auto-priority-only 'on'  # Don't hop if another pane is already waiting
+# set -g @hop-auto-priority-only 'off'  # Always hop regardless of other panes
 ```
 
 ### CLI Commands

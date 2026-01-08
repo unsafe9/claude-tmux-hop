@@ -145,6 +145,23 @@ def clear_pane_state(pane_id: str | None = None) -> None:
     run_tmux("set-option", "-p", *target, "-u", "@hop-timestamp", check=False)
 
 
+def get_global_option(name: str, default: str = "") -> str:
+    """Get a tmux global option value.
+
+    Args:
+        name: Option name (e.g., "@hop-auto")
+        default: Default value if option not set
+
+    Returns:
+        The option value, or default if not set
+    """
+    try:
+        result = run_tmux("show-option", "-gqv", name, check=False)
+        return result if result else default
+    except RuntimeError:
+        return default
+
+
 def _is_interactive_claude_on_tty(tty: str) -> bool:
     """Check if an interactive Claude Code session is running on a tty.
 

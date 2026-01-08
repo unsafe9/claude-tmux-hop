@@ -10,12 +10,13 @@ from datetime import datetime
 
 from . import __version__
 from .log import log_cli_call, log_error, log_info
-from .priority import VALID_CYCLE_MODES, VALID_STATES, get_cycle_group, sort_all_panes
+from .priority import STATE_PRIORITY, VALID_CYCLE_MODES, VALID_STATES, get_cycle_group, sort_all_panes
 from .tmux import (
     clear_pane_state,
     get_claude_panes_by_process,
     get_current_pane,
     get_current_session_window,
+    get_global_option,
     get_hop_panes,
     get_stale_panes,
     has_hop_state,
@@ -38,6 +39,70 @@ def _escape_tmux_label(s: str) -> str:
     return s
 
 
+def should_auto_hop(new_state: str) -> bool:
+    """Check if auto-hop should be triggered for the given state.
+
+    Args:
+        new_state: The state being registered ("waiting", "idle", "active")
+
+    Returns:
+        True if auto-hop should be triggered
+    """
+    # Get auto-hop configuration
+    auto_states_str = get_global_option("@hop-auto", "")
+    if not auto_states_str:
+        return False  # Disabled by default
+
+    # Parse comma-separated states
+    auto_states = {s.strip().lower() for s in auto_states_str.split(",") if s.strip()}
+
+    # Check if new state triggers auto-hop
+    if new_state not in auto_states:
+        return False
+
+    # Check priority-only flag (defaults to on)
+    priority_only = get_global_option("@hop-auto-priority-only", "on").lower() != "off"
+
+    if priority_only:
+        # Get current pane ID from environment
+        current_pane = os.environ.get("TMUX_PANE")
+        if not current_pane:
+            log_info("auto-hop: no TMUX_PANE, skipping priority check")
+            return True
+
+        # Get all panes and check if any other has equal or higher priority
+        panes = get_hop_panes(validate=True)
+        new_priority = STATE_PRIORITY.get(new_state, 2)
+
+        for pane in panes:
+            if pane.id == current_pane:
+                continue  # Skip current pane
+            pane_priority = STATE_PRIORITY.get(pane.state, 2)
+            if pane_priority <= new_priority:
+                # Another pane has equal or higher priority - don't auto-hop
+                log_info(f"auto-hop: skipped, {pane.id} has priority {pane.state}")
+                return False
+
+    return True
+
+
+def do_auto_hop() -> None:
+    """Perform auto-hop to the current pane.
+
+    Should be called from the pane that's changing state.
+    """
+    current_pane = os.environ.get("TMUX_PANE")
+    if not current_pane:
+        log_info("auto-hop: no TMUX_PANE, skipping")
+        return
+
+    success = switch_to_pane(current_pane)
+    if success:
+        log_info(f"auto-hop: switched to {current_pane}")
+    else:
+        log_error(f"auto-hop: failed to switch to {current_pane}")
+
+
 def cmd_register(args: argparse.Namespace) -> int:
     """Register the current pane with a state."""
     log_cli_call("register", {"state": args.state})
@@ -48,6 +113,11 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     set_pane_state(args.state)
     log_info(f"register: state set to {args.state}")
+
+    # Check for auto-hop
+    if should_auto_hop(args.state):
+        do_auto_hop()
+
     return 0
 
 
