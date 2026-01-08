@@ -94,7 +94,23 @@ uvx claude-tmux-hop discover
 
 # Preview what would be discovered
 uvx claude-tmux-hop discover --dry-run
+
+# Output status for tmux status bar (shows waiting/idle counts)
+uvx claude-tmux-hop status
 ```
+
+### Status Bar Integration
+
+Add to `~/.tmux.conf` to show Claude pane counts in your status bar:
+
+```bash
+set -g status-right '#{E:@hop-status} | %H:%M'
+```
+
+Output format (Nerd Font icons):
+- `󰂜 2` - 2 panes waiting for input
+- `󰄬 1` - 1 pane idle (task complete)
+- Empty when no waiting/idle panes
 
 ## How It Works
 
