@@ -15,6 +15,7 @@ from .tmux import (
     clear_pane_state,
     get_claude_panes_by_process,
     get_current_pane,
+    get_current_session_window,
     get_hop_panes,
     get_stale_panes,
     init_pane,
@@ -149,10 +150,7 @@ def cmd_picker(args: argparse.Namespace) -> int:
     sorted_panes = sort_all_panes(panes)
 
     # Get current session and window for cross-session/window switching
-    current_info = run_tmux("display-message", "-p", "#{session_name}\t#{window_index}")
-    parts = current_info.split("\t")
-    current_session = parts[0] if parts else ""
-    current_window = int(parts[1]) if len(parts) > 1 and parts[1] else None
+    current_session, current_window = get_current_session_window()
 
     # Build menu items
     menu_items = []

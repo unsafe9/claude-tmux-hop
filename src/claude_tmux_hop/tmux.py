@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import time
 from dataclasses import dataclass
@@ -67,6 +66,19 @@ def get_current_pane() -> str | None:
 def is_in_tmux() -> bool:
     """Check if we're running inside tmux."""
     return "TMUX" in os.environ
+
+
+def get_current_session_window() -> tuple[str, int | None]:
+    """Get the current tmux session name and window index.
+
+    Returns:
+        Tuple of (session_name, window_index). Window may be None if parsing fails.
+    """
+    current_info = run_tmux("display-message", "-p", "#{session_name}\t#{window_index}")
+    parts = current_info.split("\t")
+    session = parts[0] if parts else ""
+    window = int(parts[1]) if len(parts) > 1 and parts[1] else None
+    return session, window
 
 
 def _get_pane_id(pane_id: str | None) -> str | None:
@@ -371,10 +383,7 @@ def switch_to_pane(pane_id: str, target_session: str | None = None, target_windo
             return False
 
     # Get current session and window
-    current_info = run_tmux("display-message", "-p", "#{session_name}\t#{window_index}")
-    parts = current_info.split("\t")
-    current_session = parts[0] if parts else ""
-    current_window = int(parts[1]) if len(parts) > 1 and parts[1] else None
+    current_session, current_window = get_current_session_window()
 
     # Switch session/window as needed, then select the pane
     if target_session != current_session:
