@@ -41,7 +41,7 @@ def group_by_state(panes: list[PaneInfo]) -> dict[str, list[PaneInfo]]:
         else:
             # Unknown state - treat as "active" (consistent with sort_all_panes)
             print(
-                f"Warning: unknown state '{pane.state}' for pane {pane.pane_id}, treating as 'active'",
+                f"Warning: unknown state '{pane.state}' for pane {pane.id}, treating as 'active'",
                 file=sys.stderr,
             )
             groups["active"].append(pane)

@@ -6,10 +6,24 @@ import argparse
 import os
 import shlex
 import sys
+from datetime import datetime
 
 from . import __version__
 from .log import log_cli_call, log_error, log_info
 from .priority import VALID_STATES, get_cycle_group, sort_all_panes
+from .tmux import (
+    clear_pane_state,
+    get_claude_panes_by_process,
+    get_current_pane,
+    get_hop_panes,
+    get_stale_panes,
+    init_pane,
+    is_claude_pane,
+    is_in_tmux,
+    run_tmux,
+    set_pane_state,
+    switch_to_pane,
+)
 
 
 def _escape_tmux_label(s: str) -> str:
@@ -22,20 +36,6 @@ def _escape_tmux_label(s: str) -> str:
     s = s.replace('"', '\\"')
     s = s.replace("#", "\\#")
     return s
-
-
-from .tmux import (
-    clear_pane_state,
-    get_claude_panes_by_process,
-    get_current_pane,
-    get_hop_panes,
-    init_pane,
-    is_claude_pane,
-    is_in_tmux,
-    run_tmux,
-    set_pane_state,
-    switch_to_pane,
-)
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -91,7 +91,12 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         print("Error: Not running inside tmux", file=sys.stderr)
         return 1
 
-    panes = get_hop_panes()
+    # Auto-prune stale panes silently
+    for pane in get_stale_panes():
+        clear_pane_state(pane.id)
+        log_info(f"cycle: auto-pruned {pane.id}")
+
+    panes = get_hop_panes(validate=False)  # Already pruned above
     if not panes:
         log_info("cycle: no panes found")
         run_tmux("display-message", "No Claude Code sessions found")
@@ -202,8 +207,6 @@ def cmd_list(args: argparse.Namespace) -> int:
     log_info(f"list: found {len(panes)} panes")
     sorted_panes = sort_all_panes(panes)
 
-    from datetime import datetime
-
     for pane in sorted_panes:
         project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
         ts = datetime.fromtimestamp(pane.timestamp).strftime("%H:%M:%S") if pane.timestamp else "——:——:——"
@@ -258,6 +261,42 @@ def cmd_discover(args: argparse.Namespace) -> int:
         print(f"\nDiscovered {registered} session(s)")
         if skipped > 0:
             print(f"Skipped {skipped} already registered session(s)")
+
+    return 0
+
+
+def cmd_prune(args: argparse.Namespace) -> int:
+    """Remove stale hop state from panes where Claude Code is no longer running."""
+    log_cli_call("prune", {"dry_run": args.dry_run})
+
+    if not is_in_tmux():
+        log_error("prune: not in tmux")
+        print("Error: Not running inside tmux", file=sys.stderr)
+        return 1
+
+    stale = get_stale_panes()
+
+    if not stale:
+        log_info("prune: no stale panes found")
+        if not args.quiet:
+            print("No stale panes found")
+        return 0
+
+    log_info(f"prune: found {len(stale)} stale panes")
+
+    for pane in stale:
+        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
+
+        if args.dry_run:
+            print(f"Would remove: {pane.id} ({pane.session}:{pane.window}) - {project}")
+        else:
+            clear_pane_state(pane.id)
+            log_info(f"prune: cleared {pane.id}")
+            if not args.quiet:
+                print(f"Removed: {pane.id} ({pane.session}:{pane.window}) - {project}")
+
+    if not args.dry_run and not args.quiet:
+        print(f"\nPruned {len(stale)} stale pane(s)")
 
     return 0
 
@@ -360,6 +399,25 @@ def main() -> int:
         help="Suppress output except errors",
     )
     discover_parser.set_defaults(func=cmd_discover)
+
+    # prune command
+    prune_parser = subparsers.add_parser(
+        "prune",
+        help="Remove stale hop state from panes no longer running Claude Code",
+    )
+    prune_parser.add_argument(
+        "--dry-run",
+        "-n",
+        action="store_true",
+        help="Show what would be removed without making changes",
+    )
+    prune_parser.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Suppress output except errors",
+    )
+    prune_parser.set_defaults(func=cmd_prune)
 
     args = parser.parse_args()
     return args.func(args)

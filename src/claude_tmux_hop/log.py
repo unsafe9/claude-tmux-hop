@@ -83,34 +83,10 @@ def log_cli_call(command: str, args: dict | None = None) -> None:
     log.info(f"CLI {command} {args_str}".strip())
 
 
-def log_tmux_call(command: str, args: tuple, result: str | None = None) -> None:
-    """Log a tmux command execution.
-
-    Args:
-        command: The tmux command (e.g., "set-option")
-        args: Command arguments
-        result: Command output (optional)
-    """
+def log_error(message: str) -> None:
+    """Log an error message."""
     log = get_pane_logger()
-    args_str = " ".join(str(a) for a in args)
-    if result:
-        log.debug(f"tmux {command} {args_str} -> {result[:100]}")
-    else:
-        log.debug(f"tmux {command} {args_str}")
-
-
-def log_error(message: str, exc: Exception | None = None) -> None:
-    """Log an error message.
-
-    Args:
-        message: Error description
-        exc: Optional exception
-    """
-    log = get_pane_logger()
-    if exc:
-        log.error(f"{message}: {exc}")
-    else:
-        log.error(message)
+    log.error(message)
 
 
 def log_info(message: str) -> None:

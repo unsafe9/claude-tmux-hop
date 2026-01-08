@@ -37,8 +37,9 @@ uvx claude-tmux-hop <command>
   clear                   # Remove hop state from pane
   cycle                   # Jump to next pane (priority order)
   picker                  # Interactive menu
-  list                    # Show all panes
+  list                    # Show all panes (auto-validates)
   discover                # Auto-discover Claude sessions
+  prune                   # Remove stale panes no longer running Claude
 ```
 
 ## Key Patterns
