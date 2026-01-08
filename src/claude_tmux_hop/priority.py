@@ -19,6 +19,9 @@ STATE_PRIORITY = {
 # Valid states - single source of truth for CLI validation
 VALID_STATES = list(STATE_PRIORITY.keys())
 
+# Valid cycle modes
+VALID_CYCLE_MODES = ["priority", "flat"]
+
 
 def group_by_state(panes: list[PaneInfo]) -> dict[str, list[PaneInfo]]:
     """Group panes by state.
@@ -70,34 +73,33 @@ def sort_within_group(panes: list[PaneInfo], state: str) -> list[PaneInfo]:
         return sorted(panes, key=lambda p: -p.timestamp)
 
 
-def get_cycle_group(panes: list[PaneInfo], expand: bool = False) -> list[PaneInfo]:
-    """Get the highest-priority non-empty group for cycling.
+def get_cycle_group(panes: list[PaneInfo], mode: str = "priority") -> list[PaneInfo]:
+    """Get panes to cycle through based on mode.
 
-    Cycling behavior:
-    - If waiting panes exist, cycle only through waiting
-    - If no waiting but idle exist, cycle only through idle
-    - Otherwise cycle through active
+    Modes:
+    - priority: Cycle within highest-priority non-empty group only
+      (waiting -> idle -> active)
+    - flat: All panes combined, sorted by priority then timestamp
+      (waiting oldest first, then idle newest first, then active newest first)
 
     Args:
         panes: All panes with hop state
-        expand: If True and only 1 pane in group, include next priority group
+        mode: Cycle mode - "priority" (default) or "flat"
 
     Returns:
         Sorted list of panes to cycle through
     """
     groups = group_by_state(panes)
 
-    if expand:
-        # Expand to include multiple groups until we have 2+ panes
+    if mode == "flat":
+        # All panes combined: waiting (oldest first), idle (newest first), active (newest first)
         result: list[PaneInfo] = []
         for state in ["waiting", "idle", "active"]:
             if groups[state]:
                 result.extend(sort_within_group(groups[state], state))
-                if len(result) >= 2:
-                    break
         return result
     else:
-        # Default: cycle within single highest-priority group
+        # priority mode (default): cycle within single highest-priority group
         if groups["waiting"]:
             return sort_within_group(groups["waiting"], "waiting")
         elif groups["idle"]:

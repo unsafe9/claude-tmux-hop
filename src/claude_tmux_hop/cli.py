@@ -10,7 +10,7 @@ from datetime import datetime
 
 from . import __version__
 from .log import log_cli_call, log_error, log_info
-from .priority import VALID_STATES, get_cycle_group, sort_all_panes
+from .priority import VALID_CYCLE_MODES, VALID_STATES, get_cycle_group, sort_all_panes
 from .tmux import (
     clear_pane_state,
     get_claude_panes_by_process,
@@ -85,7 +85,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         return 0
 
     # Get the group to cycle through
-    group = get_cycle_group(panes, expand=args.expand)
+    group = get_cycle_group(panes, mode=args.mode)
     if not group:
         log_info("cycle: no group found")
         run_tmux("display-message", "No Claude Code sessions found")
@@ -334,10 +334,11 @@ def main() -> int:
         help="Current pane ID (passed by tmux keybinding)",
     )
     cycle_parser.add_argument(
-        "--expand",
-        "-e",
-        action="store_true",
-        help="Expand to next priority group if only 1 pane in current group",
+        "--mode",
+        "-m",
+        choices=VALID_CYCLE_MODES,
+        default="priority",
+        help="Cycle mode: 'priority' cycles within highest-priority group, 'flat' cycles through all panes",
     )
     cycle_parser.set_defaults(func=cmd_cycle)
 

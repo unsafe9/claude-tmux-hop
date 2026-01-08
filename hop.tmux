@@ -18,18 +18,17 @@ get_tmux_option() {
 main() {
     local cycle_key
     local picker_key
-    local expand
+    local cycle_mode
 
     cycle_key=$(get_tmux_option @hop-cycle-key "Space")
     picker_key=$(get_tmux_option @hop-picker-key "C-Space")
-    expand=$(get_tmux_option @hop-expand "off")
+    cycle_mode=$(get_tmux_option @hop-cycle-mode "priority")
 
     # Wrapper script respects @hop-dev-path for local development, otherwise uses uvx
     local cmd="$CURRENT_DIR/bin/claude-tmux-hop"
 
-    # Build cycle command with optional --expand flag
-    local cycle_args="--pane '#{pane_id}'"
-    [[ "$expand" == "on" ]] && cycle_args="--expand $cycle_args"
+    # Build cycle command with mode flag
+    local cycle_args="--pane '#{pane_id}' --mode '$cycle_mode'"
 
     # Bind cycle key
     # Pass pane_id via tmux variable substitution since run-shell doesn't preserve pane context

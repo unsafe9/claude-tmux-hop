@@ -59,6 +59,11 @@ set -g @hop-cycle-key 'Space'
 
 # Customize picker key (default: C-Space)
 set -g @hop-picker-key 'C-Space'
+
+# Cycle mode (default: priority)
+# - priority: cycle within highest-priority group only
+# - flat: cycle through all panes in priority order
+set -g @hop-cycle-mode 'priority'
 ```
 
 ### CLI Commands
