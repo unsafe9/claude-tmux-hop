@@ -23,8 +23,8 @@ src/claude_tmux_hop/
   tmux.py         # Tmux operations, PaneInfo dataclass
   priority.py     # State priority logic
   log.py          # Logging to ~/.local/state/claude-tmux-hop/hop.log
-claude-plugin/
-  .claude-plugin/plugin.json  # 6 hook definitions
+hooks/
+  hooks.json          # Hook definitions (7 hooks)
 hop.tmux          # TPM plugin entry point
 ```
 
@@ -52,10 +52,11 @@ uvx claude-tmux-hop <command>
 ### Tmux State Storage
 Uses custom pane options: `@hop-claude`, `@hop-state`, `@hop-timestamp`
 
-### Hook Flow (plugin.json)
+### Hook Flow (hooks.json)
 - SessionStart → init
 - UserPromptSubmit → active
 - PreToolUse (AskUserQuestion|ExitPlanMode) → waiting
+- PostToolUse → active (after user answers question or grants permission)
 - Notification (permission_prompt|elicitation_dialog) → waiting
 - Stop → idle
 - SessionEnd → clear
