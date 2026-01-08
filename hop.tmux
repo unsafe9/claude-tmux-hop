@@ -20,8 +20,8 @@ main() {
     local picker_key
     local expand
 
-    cycle_key=$(get_tmux_option @hop-cycle-key "Tab")
-    picker_key=$(get_tmux_option @hop-picker-key "C-Tab")
+    cycle_key=$(get_tmux_option @hop-cycle-key "Space")
+    picker_key=$(get_tmux_option @hop-picker-key "C-Space")
     expand=$(get_tmux_option @hop-expand "off")
 
     # Wrapper script respects @hop-dev-path for local development, otherwise uses uvx

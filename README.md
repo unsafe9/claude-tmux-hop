@@ -46,19 +46,19 @@ Any existing Claude Code sessions will be automatically discovered and registere
 
 | Key | Action |
 |-----|--------|
-| `prefix + Tab` | Cycle to next Claude Code pane |
-| `prefix + C-Tab` | Open picker menu (if enabled) |
+| `prefix + Space` | Cycle to next Claude Code pane |
+| `prefix + C-Space` | Open picker menu |
 
 ### Configuration
 
 Add to `~/.tmux.conf`:
 
 ```bash
-# Customize cycle key (default: Tab)
-set -g @hop-cycle-key 'Tab'
+# Customize cycle key (default: Space)
+set -g @hop-cycle-key 'Space'
 
-# Customize picker key (default: C-Tab)
-set -g @hop-picker-key 'C-Tab'
+# Customize picker key (default: C-Space)
+set -g @hop-picker-key 'C-Space'
 ```
 
 ### CLI Commands
