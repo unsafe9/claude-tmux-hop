@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-tmux-hop"
-version = "0.2.0"
+version = "0.2.1"
 description = "Hop between Claude Code sessions in tmux panes"
 readme = "README.md"
 license = "MIT"
