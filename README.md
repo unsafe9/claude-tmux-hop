@@ -10,6 +10,7 @@ Quickly hop between Claude Code sessions running in tmux panes.
 - **Auto-discovery**: Existing Claude Code sessions are detected on plugin load
 - **In-memory state**: Uses tmux pane options - no files, auto-cleanup when panes close
 - **Cross-session navigation**: Works across all tmux sessions
+- **Status bar integration**: Show pane counts with customizable icons
 
 ## Requirements
 
@@ -75,6 +76,14 @@ set -g @hop-auto 'waiting'           # Auto-switch when a pane needs input
 # Only auto-hop if no other pane has equal or higher priority
 set -g @hop-auto-priority-only 'on'  # Don't hop if another pane is already waiting
 # set -g @hop-auto-priority-only 'off'  # Always hop regardless of other panes
+
+# Status bar integration - show pane counts in status bar
+set -g status-right '#{E:@hop-status} | %H:%M'
+
+# Status format (default: "{waiting:󰂜} {idle:󰄬}")
+# Syntax: {state:icon} shows "icon count" when count > 0
+set -g @hop-status-format '{waiting:󰂜} {idle:󰄬} {active:󰑮}'  # Include active
+# set -g @hop-status-format '{waiting:W} {idle:I} {active:A}'  # ASCII icons
 ```
 
 ### CLI Commands
@@ -92,25 +101,12 @@ uvx claude-tmux-hop picker
 # Discover existing Claude Code sessions (runs automatically on plugin load)
 uvx claude-tmux-hop discover
 
-# Preview what would be discovered
-uvx claude-tmux-hop discover --dry-run
+# Remove stale state from panes no longer running Claude Code
+uvx claude-tmux-hop prune
 
-# Output status for tmux status bar (shows waiting/idle counts)
+# Output status for tmux status bar
 uvx claude-tmux-hop status
 ```
-
-### Status Bar Integration
-
-Add to `~/.tmux.conf` to show Claude pane counts in your status bar:
-
-```bash
-set -g status-right '#{E:@hop-status} | %H:%M'
-```
-
-Output format (Nerd Font icons):
-- `󰂜 2` - 2 panes waiting for input
-- `󰄬 1` - 1 pane idle (task complete)
-- Empty when no waiting/idle panes
 
 ## How It Works
 
@@ -118,15 +114,22 @@ Output format (Nerd Font icons):
 
 | State | Trigger | Priority |
 |-------|---------|----------|
-| `waiting` | Notification hook (permission prompt) | Highest |
-| `idle` | Stop hook (task complete) | Medium |
-| `active` | UserPromptSubmit hook | Lowest |
+| `waiting` | User input required | Highest |
+| `idle` | Task complete | Medium |
+| `active` | Working | Lowest |
 
 ### Cycling Behavior
 
+Controlled by `@hop-cycle-mode` (default: `priority`):
+
+**Priority mode** (`set -g @hop-cycle-mode 'priority'`):
 1. If waiting panes exist, cycle only through waiting panes (oldest first)
 2. If no waiting, cycle through idle panes (newest first)
 3. If no idle, cycle through active panes (newest first)
+
+**Flat mode** (`set -g @hop-cycle-mode 'flat'`):
+- Cycle through all panes in priority order (waiting → idle → active)
+- Within each priority level, sorted by timestamp
 
 ### State Storage
 
@@ -138,17 +141,6 @@ Benefits:
 - No external files
 - State auto-deleted when pane closes
 - Fast (in-memory)
-
-## Releasing a New Version
-
-Update the version in `pyproject.toml`, then publish to PyPI:
-
-```bash
-uv build
-uv publish
-```
-
-Both plugins use `uvx` which always fetches the latest version from PyPI.
 
 ## License
 

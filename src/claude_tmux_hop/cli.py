@@ -359,7 +359,18 @@ def cmd_prune(args: argparse.Namespace) -> int:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    """Output status bar string for tmux integration."""
+    """Output status bar string for tmux integration.
+
+    Format string syntax (set via @hop-status-format):
+        {state:icon} - shows "icon count" when count > 0, empty otherwise
+
+    Example formats:
+        "{waiting:󰂜} {idle:󰄬}"              - default, waiting + idle only
+        "{waiting:󰂜} {idle:󰄬} {active:󰑮}"  - include active count
+        "{waiting:W} {idle:I} {active:A}"    - ASCII icons
+    """
+    import re
+
     # Don't log to avoid overhead in polling scenario
 
     if not is_in_tmux():
@@ -370,21 +381,30 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     # Group by state
     groups = group_by_state(panes)
-    waiting_count = len(groups["waiting"])
-    idle_count = len(groups["idle"])
+    counts = {
+        "waiting": len(groups["waiting"]),
+        "idle": len(groups["idle"]),
+        "active": len(groups["active"]),
+    }
 
-    # Early exit if nothing to show
-    if waiting_count == 0 and idle_count == 0:
-        return 0  # Empty output
+    # Get format string from tmux option
+    default_format = "{waiting:󰂜} {idle:󰄬}"
+    format_str = get_global_option("@hop-status-format", default_format)
 
-    # Format: "󰂜 2 󰄬 1" (nerd font icons - Material Design, only non-zero counts)
-    parts = []
-    if waiting_count > 0:
-        parts.append(f"󰂜 {waiting_count}")  # nf-md-bell_ring
-    if idle_count > 0:
-        parts.append(f"󰄬 {idle_count}")  # nf-md-check
+    # Parse and expand format: {state:icon} -> "icon count" or ""
+    def expand_placeholder(match: re.Match) -> str:
+        state = match.group(1)
+        icon = match.group(2)
+        count = counts.get(state, 0)
+        return f"{icon} {count}" if count > 0 else ""
 
-    print(" ".join(parts), end="")
+    result = re.sub(r"\{(\w+):([^}]*)\}", expand_placeholder, format_str)
+
+    # Clean up multiple spaces and trim
+    result = " ".join(result.split())
+
+    if result:
+        print(result, end="")
     return 0
 
 
