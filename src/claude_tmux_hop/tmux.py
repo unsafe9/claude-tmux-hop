@@ -10,8 +10,6 @@ from dataclasses import dataclass
 
 from .log import log_debug, log_error
 
-# Pattern to detect Claude Code processes (shows as semver in pane_current_command)
-_SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
 
 
 @dataclass
@@ -130,10 +128,56 @@ def clear_pane_state(pane_id: str | None = None) -> None:
     run_tmux("set-option", "-p", *target, "-u", "@hop-timestamp", check=False)
 
 
-def get_running_claude_pane_ids() -> set[str]:
-    """Get the set of pane IDs currently running Claude Code.
+def _is_interactive_claude_on_tty(tty: str) -> bool:
+    """Check if an interactive Claude Code session is running on a tty.
 
-    Claude Code shows as a semver version (e.g., "2.0.76") in pane_current_command.
+    Uses ps to get all processes on the tty and checks for 'claude' command
+    without -p/--print flags (which indicate non-interactive mode).
+
+    Args:
+        tty: The tty device path (e.g., "/dev/ttys042")
+
+    Returns:
+        True if an interactive Claude Code session is running.
+    """
+    try:
+        result = subprocess.run(
+            ["ps", "-t", tty, "-o", "args="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+
+        for line in result.stdout.splitlines():
+            # Check if this is a claude command
+            # Match: "claude", "/path/to/claude", "claude arg1 arg2"
+            parts = line.split()
+            if not parts:
+                continue
+
+            cmd = parts[0]
+            # Get the base command name (handle paths like /usr/local/bin/claude)
+            cmd_name = os.path.basename(cmd)
+
+            if cmd_name.lower() == "claude":
+                # Check for non-interactive flags
+                args = parts[1:] if len(parts) > 1 else []
+                if "-p" in args or "--print" in args:
+                    continue  # Skip non-interactive mode
+                return True
+
+        return False
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def get_running_claude_pane_ids() -> set[str]:
+    """Get the set of pane IDs currently running interactive Claude Code.
+
+    Uses ps to check processes on each pane's tty for the 'claude' command.
+    Excludes panes running Claude with -p/--print (non-interactive mode).
 
     Returns:
         Set of pane IDs (e.g., {"%0", "%5"}) running Claude Code.
@@ -142,7 +186,7 @@ def get_running_claude_pane_ids() -> set[str]:
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}\t#{pane_current_command}",
+        "#{pane_id}\t#{pane_tty}",
     )
 
     pane_ids = set()
@@ -154,17 +198,18 @@ def get_running_claude_pane_ids() -> set[str]:
         if len(parts) < 2:
             continue
 
-        pane_id, command = parts
-        if _SEMVER_PATTERN.match(command):
+        pane_id, tty = parts
+        if tty and _is_interactive_claude_on_tty(tty):
             pane_ids.add(pane_id)
 
     return pane_ids
 
 
 def get_claude_panes_by_process() -> list[dict]:
-    """Find all panes running Claude Code by checking process name.
+    """Find all panes running interactive Claude Code by checking processes.
 
-    Claude Code shows as a semver version (e.g., "2.0.76") in pane_current_command.
+    Uses ps to check processes on each pane's tty for the 'claude' command.
+    Excludes panes running Claude with -p/--print (non-interactive mode).
 
     Returns:
         List of dicts with pane info for each Claude pane found.
@@ -173,7 +218,7 @@ def get_claude_panes_by_process() -> list[dict]:
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}\t#{pane_current_command}\t#{pane_current_path}\t#{session_name}\t#{window_index}",
+        "#{pane_id}\t#{pane_tty}\t#{pane_current_path}\t#{session_name}\t#{window_index}",
     )
 
     panes = []
@@ -185,12 +230,11 @@ def get_claude_panes_by_process() -> list[dict]:
         if len(parts) < 5:
             continue
 
-        pane_id, command, cwd, session, window_str = parts
+        pane_id, tty, cwd, session, window_str = parts
 
-        if _SEMVER_PATTERN.match(command):
+        if tty and _is_interactive_claude_on_tty(tty):
             panes.append({
                 "id": pane_id,
-                "command": command,
                 "cwd": cwd,
                 "session": session,
                 "window": int(window_str) if window_str else 0,
