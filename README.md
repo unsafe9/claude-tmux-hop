@@ -12,6 +12,7 @@ Quickly hop between Claude Code sessions running in tmux panes.
 - **In-memory state**: Uses tmux pane options - no files, auto-cleanup when panes close
 - **Cross-session navigation**: Works across all tmux sessions
 - **Status bar integration**: Show pane counts with customizable icons
+- **Popup picker**: Interactive fzf-based picker with time-in-state display (requires fzf)
 
 ## Requirements
 
@@ -100,10 +101,12 @@ uvx claude-tmux-hop list
 # Cycle to next pane (usually via keybinding)
 uvx claude-tmux-hop cycle
 
-# Show picker menu
 # Jump back to previous pane (cross-session/window)
 uvx claude-tmux-hop back
+
+# Show picker menu (fzf popup if available, else display-menu)
 uvx claude-tmux-hop picker
+uvx claude-tmux-hop picker --menu  # Force display-menu style
 
 # Discover existing Claude Code sessions (runs automatically on plugin load)
 uvx claude-tmux-hop discover

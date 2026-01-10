@@ -85,6 +85,37 @@ def is_in_tmux() -> bool:
     return "TMUX" in os.environ
 
 
+def get_tmux_version() -> tuple[int, int]:
+    """Get the tmux version as (major, minor).
+
+    Returns:
+        Tuple of (major, minor) version numbers, e.g., (3, 2)
+        Returns (0, 0) if version cannot be determined
+    """
+    import re
+
+    try:
+        result = subprocess.run(
+            ["tmux", "-V"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        # Parse "tmux 3.2" or "tmux 3.2a"
+        match = re.search(r"tmux\s+(\d+)\.(\d+)", result.stdout)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    except (subprocess.CalledProcessError, OSError, ValueError):
+        pass
+    return (0, 0)
+
+
+def supports_popup() -> bool:
+    """Check if tmux supports display-popup (requires 3.2+)."""
+    major, minor = get_tmux_version()
+    return (major, minor) >= (3, 2)
+
+
 def get_current_session_window() -> tuple[str, int | None]:
     """Get the current tmux session name and window index.
 
