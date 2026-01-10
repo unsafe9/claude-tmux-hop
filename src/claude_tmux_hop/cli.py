@@ -22,6 +22,7 @@ from .tmux import (
     has_hop_state,
     is_in_tmux,
     run_tmux,
+    set_global_option,
     set_pane_state,
     switch_to_pane,
 )
@@ -183,22 +184,34 @@ def cmd_cycle(args: argparse.Namespace) -> int:
 def cmd_picker(args: argparse.Namespace) -> int:
     """Show a picker menu for all Claude Code panes."""
     log_cli_call("picker")
+def cmd_back(args: argparse.Namespace) -> int:
+    """Jump back to the previous pane."""
+    log_cli_call("back")
 
     if not is_in_tmux():
-        log_error("picker: not in tmux")
+        log_error("back: not in tmux")
         print("Error: Not running inside tmux", file=sys.stderr)
         return 1
 
-    panes = get_hop_panes()
-    if not panes:
-        log_info("picker: no panes found")
-        run_tmux("display-message", "No Claude Code sessions found")
+    # Get previous pane from global option
+    previous_pane = get_global_option("@hop-previous-pane", "")
+    if not previous_pane:
+        log_info("back: no previous pane recorded")
+        run_tmux("display-message", "No previous pane to jump to")
         return 0
 
-    log_info(f"picker: showing {len(panes)} panes")
+    # Switch to previous pane (this will update @hop-previous-pane)
+    success = switch_to_pane(previous_pane)
+    if success:
+        log_info(f"back: jumped to {previous_pane}")
+    else:
+        log_error(f"back: failed to switch to {previous_pane}")
+        # Clear stale previous if pane no longer exists
+        run_tmux("set-option", "-g", "-u", "@hop-previous-pane", check=False)
+        run_tmux("display-message", "Previous pane no longer exists")
+        return 1
 
-    # Sort panes for display
-    sorted_panes = sort_all_panes(panes)
+    return 0
 
     # Get current session and window for cross-session/window switching
     current_session, current_window = get_current_session_window()
@@ -462,6 +475,12 @@ def main() -> int:
     )
     cycle_parser.set_defaults(func=cmd_cycle)
 
+    # back command
+    back_parser = subparsers.add_parser(
+        "back",
+        help="Jump back to the previous pane",
+    )
+    back_parser.set_defaults(func=cmd_back)
     # picker command
     picker_parser = subparsers.add_parser(
         "picker",

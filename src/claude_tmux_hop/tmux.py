@@ -179,6 +179,16 @@ def get_global_option(name: str, default: str = "") -> str:
         return default
 
 
+def set_global_option(name: str, value: str) -> None:
+    """Set a tmux global option.
+
+    Args:
+        name: Option name (e.g., "@hop-previous-pane")
+        value: Value to set
+    """
+    run_tmux("set-option", "-g", name, value)
+
+
 def _is_interactive_claude_on_tty(tty: str) -> bool:
     """Check if an interactive Claude Code session is running on a tty.
 
@@ -367,17 +377,29 @@ def get_stale_panes() -> list[PaneInfo]:
     return [p for p in all_hop_panes if p.id not in running_pane_ids]
 
 
-def switch_to_pane(pane_id: str, target_session: str | None = None, target_window: int | None = None) -> bool:
+def switch_to_pane(
+    pane_id: str,
+    target_session: str | None = None,
+    target_window: int | None = None,
+    store_previous: bool = True,
+) -> bool:
     """Switch to a pane, handling cross-session and cross-window navigation.
 
     Args:
         pane_id: The target pane ID (e.g., "%99")
         target_session: The session name (optional, will be looked up if not provided)
         target_window: The window index (optional, used for cross-session/window switches)
+        store_previous: If True, store current pane in @hop-previous-pane for jump-back
 
     Returns:
         True if switch was successful, False if pane not found
     """
+    # Store current pane as previous before switching (for jump-back)
+    if store_previous:
+        current_pane = get_current_pane()
+        if current_pane and current_pane != pane_id:
+            set_global_option("@hop-previous-pane", current_pane)
+
     # Look up session if not provided
     if target_session is None:
         output = run_tmux(

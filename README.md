@@ -5,6 +5,7 @@ Quickly hop between Claude Code sessions running in tmux panes.
 ## Features
 
 - **Priority-based cycling**: Jump to panes waiting for input first, then idle, then active
+- **Jump-back**: Return to previous pane across sessions/windows with Alt+Space
 - **Auto-hop**: Optionally auto-switch to panes when they need attention
 - **Auto-registration**: Claude Code hooks automatically track pane states
 - **Auto-discovery**: Existing Claude Code sessions are detected on plugin load
@@ -50,6 +51,7 @@ Any existing Claude Code sessions will be automatically discovered and registere
 |-----|--------|
 | `prefix + Space` | Cycle to next Claude Code pane |
 | `prefix + C-Space` | Open picker menu |
+| `Alt + Space` | Jump back to previous pane (no prefix) |
 
 ### Configuration
 
@@ -61,6 +63,9 @@ set -g @hop-cycle-key 'Space'
 
 # Customize picker key (default: C-Space)
 set -g @hop-picker-key 'C-Space'
+
+# Customize back key (default: M-Space, root binding - no prefix)
+set -g @hop-back-key 'M-Space'
 
 # Cycle mode (default: priority)
 # - priority: cycle within highest-priority group only
@@ -96,6 +101,8 @@ uvx claude-tmux-hop list
 uvx claude-tmux-hop cycle
 
 # Show picker menu
+# Jump back to previous pane (cross-session/window)
+uvx claude-tmux-hop back
 uvx claude-tmux-hop picker
 
 # Discover existing Claude Code sessions (runs automatically on plugin load)
