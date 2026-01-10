@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shlex
-import shutil
 import sys
 from datetime import datetime
 
@@ -16,7 +14,6 @@ from .tmux import (
     clear_pane_state,
     get_claude_panes_by_process,
     get_current_pane,
-    get_current_session_window,
     get_global_option,
     get_hop_panes,
     get_stale_panes,
@@ -25,21 +22,8 @@ from .tmux import (
     run_tmux,
     set_global_option,
     set_pane_state,
-    supports_popup,
     switch_to_pane,
 )
-
-
-def _escape_tmux_label(s: str) -> str:
-    """Escape a string for use in tmux menu labels.
-
-    Escapes special characters that tmux interprets in menu labels.
-    """
-    # Escape backslashes first, then other special chars
-    s = s.replace("\\", "\\\\")
-    s = s.replace('"', '\\"')
-    s = s.replace("#", "\\#")
-    return s
 
 
 def _format_time_ago(timestamp: int) -> str:
@@ -247,117 +231,6 @@ def cmd_back(args: argparse.Namespace) -> int:
         return 1
 
     return 0
-
-
-def _has_fzf() -> bool:
-    """Check if fzf is available."""
-    return shutil.which("fzf") is not None
-
-
-def _get_hop_command_path() -> str:
-    """Get the path to the claude-tmux-hop command.
-
-    Respects @hop-dev-path for local development.
-    """
-    dev_path = get_global_option("@hop-dev-path", "")
-    if dev_path:
-        return f"uv run --project {shlex.quote(dev_path)} claude-tmux-hop"
-    return "uvx claude-tmux-hop"
-
-
-def _picker_popup() -> int:
-    """Show picker using tmux popup with fzf."""
-    cmd = _get_hop_command_path()
-
-    # Build fzf command
-    # --ansi: enable color codes
-    # --reverse: show from top
-    # --no-info: hide match count
-    # --with-nth=1: only show first field (before tab)
-    # The selected line's second field (pane_id) is used for switching
-    fzf_cmd = (
-        f"{cmd} picker-data | "
-        f"fzf --ansi --reverse --no-info --with-nth=1 --delimiter='\t' "
-        f"--header='Claude Sessions' --pointer='>' --prompt='' "
-        f"--bind='enter:execute-silent({cmd} switch --pane {{2}})+abort' "
-        f"|| true"
-    )
-
-    # Run in popup
-    run_tmux(
-        "display-popup",
-        "-E",  # Close popup when command exits
-        "-w", "50%",
-        "-h", "50%",
-        "-T", " Claude Sessions ",
-        "bash", "-c", fzf_cmd,
-    )
-
-    return 0
-
-
-def _picker_menu(panes: list) -> int:
-    """Show picker using tmux display-menu (fallback)."""
-    sorted_panes = sort_all_panes(panes)
-    current_session, current_window = get_current_session_window()
-
-    menu_items = []
-    for pane in sorted_panes:
-        icon = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}.get(pane.state, "?")
-        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
-        time_ago = _format_time_ago(pane.timestamp)
-
-        safe_project = _escape_tmux_label(project)
-        safe_session = _escape_tmux_label(pane.session)
-
-        label = f"{icon} {safe_project} ({safe_session}:{pane.window}) [{time_ago}]"
-
-        if pane.session != current_session:
-            target = f"{pane.session}:{pane.window}"
-            cmd = f"switch-client -t {shlex.quote(target)} ; select-pane -t {shlex.quote(pane.id)}"
-        elif pane.window != current_window:
-            target = f"{pane.session}:{pane.window}"
-            cmd = f"select-window -t {shlex.quote(target)} ; select-pane -t {shlex.quote(pane.id)}"
-        else:
-            cmd = f"select-pane -t {shlex.quote(pane.id)}"
-
-        menu_items.append(label)
-        menu_items.append("")  # Key shortcut (empty = none)
-        menu_items.append(cmd)
-
-    run_tmux(
-        "display-menu",
-        "-T",
-        "#[align=centre]Claude Sessions",
-        *menu_items,
-    )
-    return 0
-
-
-def cmd_picker(args: argparse.Namespace) -> int:
-    """Show a picker menu for all Claude Code panes."""
-    log_cli_call("picker")
-
-    if not is_in_tmux():
-        log_error("picker: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
-
-    panes = get_hop_panes()
-    if not panes:
-        log_info("picker: no panes found")
-        run_tmux("display-message", "No Claude Code sessions found")
-        return 0
-
-    log_info(f"picker: showing {len(panes)} panes")
-
-    # Check for popup support and fzf availability
-    use_popup = supports_popup() and _has_fzf() and not getattr(args, "menu", False)
-
-    if use_popup:
-        return _picker_popup()
-    else:
-        return _picker_menu(panes)
 
 
 def cmd_picker_data(args: argparse.Namespace) -> int:
@@ -617,19 +490,6 @@ def main() -> int:
         help="Jump back to the previous pane",
     )
     back_parser.set_defaults(func=cmd_back)
-
-    # picker command
-    picker_parser = subparsers.add_parser(
-        "picker",
-        help="Show picker menu for Claude Code panes",
-    )
-    picker_parser.add_argument(
-        "--menu",
-        "-m",
-        action="store_true",
-        help="Force display-menu style (no popup)",
-    )
-    picker_parser.set_defaults(func=cmd_picker)
 
     # picker-data command (internal)
     picker_data_parser = subparsers.add_parser(

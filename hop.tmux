@@ -14,6 +14,74 @@ get_tmux_option() {
     echo "${value:-$default}"
 }
 
+# Get the hop command path (respects @hop-dev-path)
+get_hop_cmd() {
+    local dev_path
+    dev_path=$(get_tmux_option @hop-dev-path "")
+    if [[ -n "$dev_path" ]]; then
+        echo "uv run --project '$dev_path' claude-tmux-hop"
+    else
+        echo "$CURRENT_DIR/bin/claude-tmux-hop"
+    fi
+}
+
+# Check tmux version >= 3.2 (for popup support)
+supports_popup() {
+    local version
+    version=$(tmux -V | sed 's/[^0-9.]//g')
+    local major minor
+    major=$(echo "$version" | cut -d. -f1)
+    minor=$(echo "$version" | cut -d. -f2)
+    [[ "$major" -gt 3 ]] || { [[ "$major" -eq 3 ]] && [[ "$minor" -ge 2 ]]; }
+}
+
+# Show picker using fzf in a popup
+picker_popup() {
+    local cmd="$1"
+
+    # fzf options:
+    # --ansi: enable color codes
+    # --reverse: show from top
+    # --no-info: hide match count
+    # --with-nth=1: only show first field (before tab)
+    # The selected line's second field (pane_id) is used for switching
+    local fzf_cmd
+    fzf_cmd="$cmd picker-data | fzf --ansi --reverse --no-info --with-nth=1 --delimiter='\t' --header='Claude Sessions' --pointer='>' --prompt='' --bind='enter:execute-silent($cmd switch --pane {2})+abort' || true"
+
+    tmux display-popup -E -w 50% -h 50% -T " Claude Sessions " bash -c "$fzf_cmd"
+}
+
+# Show picker using display-menu (fallback)
+picker_menu() {
+    local cmd="$1"
+    local menu_args=("-T" "#[align=centre]Claude Sessions")
+    local line label pane_id
+
+    while IFS=$'\t' read -r label pane_id; do
+        [[ -z "$pane_id" ]] && continue
+        menu_args+=("$label" "" "run-shell '$cmd switch --pane $pane_id'")
+    done < <($cmd picker-data)
+
+    if [[ ${#menu_args[@]} -eq 2 ]]; then
+        tmux display-message "No Claude Code sessions found"
+        return 0
+    fi
+
+    tmux display-menu "${menu_args[@]}"
+}
+
+# Main picker function
+hop_picker() {
+    local cmd
+    cmd=$(get_hop_cmd)
+
+    if supports_popup && command -v fzf &>/dev/null; then
+        picker_popup "$cmd"
+    else
+        picker_menu "$cmd"
+    fi
+}
+
 # Main plugin setup
 main() {
     local cycle_key
@@ -36,8 +104,8 @@ main() {
     # Pass pane_id via tmux variable substitution since run-shell doesn't preserve pane context
     tmux bind-key "$cycle_key" run-shell "$cmd cycle $cycle_args"
 
-    # Bind picker key (prefix + key)
-    tmux bind-key "$picker_key" run-shell "$cmd picker"
+    # Bind picker key (prefix + key) - uses bash function from this script
+    tmux bind-key "$picker_key" run-shell "source '$CURRENT_DIR/hop.tmux' && hop_picker"
 
     # Bind back key (root binding, no prefix needed)
     tmux bind-key -n "$back_key" run-shell "$cmd back"
