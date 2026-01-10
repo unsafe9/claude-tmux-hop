@@ -279,7 +279,8 @@ def _picker_popup() -> int:
         f"{cmd} picker-data | "
         f"fzf --ansi --reverse --no-info --with-nth=1 --delimiter='\t' "
         f"--header='Claude Sessions' --pointer='>' --prompt='' "
-        f"--bind='enter:execute-silent({cmd} switch --pane {{2}})+abort'"
+        f"--bind='enter:execute-silent({cmd} switch --pane {{2}})+abort' "
+        f"|| true"
     )
 
     # Run in popup

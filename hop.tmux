@@ -22,8 +22,8 @@ main() {
     local cycle_mode
 
     cycle_key=$(get_tmux_option @hop-cycle-key "Space")
-    picker_key=$(get_tmux_option @hop-picker-key "C-Space")
-    back_key=$(get_tmux_option @hop-back-key "M-Space")
+    picker_key=$(get_tmux_option @hop-picker-key "C-f")
+    back_key=$(get_tmux_option @hop-back-key "C-Space")
     cycle_mode=$(get_tmux_option @hop-cycle-mode "priority")
 
     # Wrapper script respects @hop-dev-path for local development, otherwise uses uvx
