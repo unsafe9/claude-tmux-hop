@@ -72,3 +72,6 @@ Optional feature to auto-switch to panes on state change:
 - Early return when not in tmux (`is_in_tmux()`)
 - Subprocess calls for tmux commands with error handling
 
+## Tool Use
+- Use `uv run` instead of `python`
+
