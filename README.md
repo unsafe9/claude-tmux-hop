@@ -7,6 +7,8 @@ Quickly hop between Claude Code sessions running in tmux panes.
 - **Priority-based cycling**: Jump to panes waiting for input first, then idle, then active
 - **Jump-back**: Return to previous pane across sessions/windows with Alt+Space
 - **Auto-hop**: Optionally auto-switch to panes when they need attention
+- **System notifications**: Display OS notification when panes need attention (macOS/Linux/Windows)
+- **Terminal focus**: Automatically bring terminal to foreground when panes need attention (macOS/Linux/Windows)
 - **Auto-registration**: Claude Code hooks automatically track pane states
 - **Auto-discovery**: Existing Claude Code sessions are detected on plugin load
 - **In-memory state**: Uses tmux pane options - no files, auto-cleanup when panes close
@@ -83,6 +85,21 @@ set -g @hop-auto 'waiting'           # Auto-switch when a pane needs input
 set -g @hop-auto-priority-only 'on'  # Don't hop if another pane is already waiting
 # set -g @hop-auto-priority-only 'off'  # Always hop regardless of other panes
 
+# System notification: display OS notification when pane state changes
+# Disabled by default. Set to comma-separated states to enable.
+set -g @hop-notify 'waiting'         # Notify when a pane needs input
+# set -g @hop-notify 'waiting,idle'  # Also notify when tasks complete
+
+# Terminal focus: bring terminal app to foreground when pane state changes
+# Disabled by default. Set to comma-separated states to enable.
+set -g @hop-focus-app 'waiting'      # Focus terminal when a pane needs input
+
+# Terminal app override (auto-detected from TERM_PROGRAM by default)
+# set -g @hop-terminal-app 'iTerm'   # Explicitly set terminal app name
+
+# Note: On macOS, iTerm2 and Terminal.app will focus the specific tab/window
+# containing the tmux session, not just bring the app to foreground.
+
 # Status bar integration - show pane counts in status bar
 set -g status-right '#{E:@hop-status} | %H:%M'
 
@@ -151,6 +168,114 @@ Benefits:
 - No external files
 - State auto-deleted when pane closes
 - Fast (in-memory)
+
+## Notifications & Focus
+
+### Overview
+
+Two complementary features help you stay aware of Claude Code activity:
+
+| Feature | Option | Behavior |
+|---------|--------|----------|
+| **System Notification** | `@hop-notify` | Shows OS notification (toast) |
+| **Terminal Focus** | `@hop-focus-app` | Brings terminal to foreground and navigates to pane |
+
+### Smart Notification Suppression
+
+Notifications are **automatically suppressed** when you're already looking at the terminal:
+
+1. Checks if terminal app is the frontmost application
+2. On macOS iTerm2/Terminal.app: also checks if the correct tab/window is focused
+3. If already focused → no notification (avoids redundant alerts)
+
+This prevents notification spam when you're actively working in the terminal.
+
+### Auto-Focus Navigation
+
+When `@hop-focus-app` is enabled, it performs **full navigation**:
+
+```
+Terminal App → Tab/Window → tmux Session → tmux Window → tmux Pane
+```
+
+| Platform | App Focus | Tab Focus | tmux Navigation |
+|----------|-----------|-----------|-----------------|
+| macOS | ✅ AppleScript | ✅ iTerm2, Terminal.app | ✅ |
+| Linux | ✅ wmctrl/xdotool | ❌ | ✅ |
+| Windows | ✅ PowerShell COM | ❌ | ✅ |
+
+### Click-to-Focus Notifications (macOS)
+
+When `@hop-focus-app` is **disabled** but `@hop-notify` is enabled, clicking the notification can navigate to the pane.
+
+**Requires optional dependency:**
+```bash
+brew install terminal-notifier
+```
+
+| terminal-notifier | Notification | Click Action |
+|-------------------|--------------|--------------|
+| Not installed | ✅ Shows | ❌ Does nothing |
+| Installed | ✅ Shows | ✅ Navigates to pane |
+
+Without `terminal-notifier`, notifications still work - you just can't click them to navigate.
+
+### Platform Support
+
+#### macOS (Full Support)
+- **Notifications**: Native via AppleScript `display notification`
+- **Focus Detection**: AppleScript queries frontmost app and iTerm2/Terminal.app tabs
+- **App Focus**: AppleScript `activate` command
+- **Tab Focus**: AppleScript searches iTerm2 sessions / Terminal.app windows by tmux session name
+- **Click-to-Focus**: Optional via `terminal-notifier`
+
+#### Linux (X11)
+- **Notifications**: `notify-send` (libnotify)
+- **Focus Detection**: `xdotool getactivewindow` (X11 only, not Wayland)
+- **App/Window Focus**: `wmctrl` or `xdotool`
+- **Click-to-Focus**: Not supported (would require D-Bus complexity)
+
+#### Windows
+- **Notifications**: PowerShell Toast Notifications (Windows 10+)
+- **Focus Detection**: PowerShell with Win32 `GetForegroundWindow`
+- **App Focus**: PowerShell `WScript.Shell.AppActivate`
+- **Click-to-Focus**: Not supported (would require protocol handler)
+
+### Recommended Configuration
+
+**Option A: Just notifications (minimal)**
+```bash
+set -g @hop-notify 'waiting'   # Alert when input needed
+```
+
+**Option B: Auto-focus (recommended)**
+```bash
+set -g @hop-focus-app 'waiting'   # Auto-navigate when input needed
+```
+
+**Option C: Both (belt and suspenders)**
+```bash
+set -g @hop-notify 'waiting'      # Alert if not focused
+set -g @hop-focus-app 'waiting'   # Also auto-navigate
+# Notification is suppressed when focus succeeds, so no duplicate alerts
+```
+
+### Terminal App Detection
+
+The terminal app is auto-detected from environment variables:
+
+| Priority | Source | Example |
+|----------|--------|---------|
+| 1 | `@hop-terminal-app` option | User override |
+| 2 | `__CFBundleIdentifier` (macOS) | `com.googlecode.iterm2` → iTerm |
+| 3 | `WT_SESSION` (Windows) | Windows Terminal |
+| 4 | `TERM_PROGRAM` | `vscode`, `Alacritty`, etc. |
+
+Supported terminals include:
+- **macOS**: Terminal.app, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper
+- **IDEs**: VS Code, Cursor, Windsurf, Zed, Antigravity, all JetBrains IDEs
+- **Linux**: gnome-terminal, Konsole, Alacritty, kitty, Tilix, Terminator
+- **Windows**: Windows Terminal, ConEmu, Cmder
 
 ## License
 
