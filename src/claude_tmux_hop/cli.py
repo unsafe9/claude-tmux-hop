@@ -8,6 +8,8 @@ import sys
 from datetime import datetime
 
 from . import __version__
+from pathlib import Path
+
 from .log import log_cli_call, log_error, log_info
 from .priority import STATE_PRIORITY, VALID_CYCLE_MODES, VALID_STATES, get_cycle_group, group_by_state, sort_all_panes
 from .tmux import (
@@ -430,6 +432,188 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_install(args: argparse.Namespace) -> int:
+    """Interactive installation wizard."""
+    from .install import (
+        detect_environment,
+        install_claude_plugin,
+        install_tmux_plugin_manual,
+        install_tmux_plugin_tpm,
+        prompt_user,
+    )
+
+    log_cli_call("install", {"yes": args.yes, "component": args.component})
+
+    print("Claude Tmux Hop Installation\n")
+
+    # Detect environment
+    print("Detecting environment...")
+    env = detect_environment()
+
+    print(f"  tmux: {'OK' if env['tmux']['installed'] else 'NOT FOUND'}")
+    print(f"  claude: {'OK' if env['claude']['installed'] else 'NOT FOUND'}")
+    print(f"  TPM: {'OK' if env['tpm']['installed'] else 'NOT FOUND'}")
+    print(f"  fzf: {'OK' if env['fzf']['installed'] else 'NOT FOUND (optional)'}")
+    print()
+
+    if not env["tmux"]["installed"]:
+        print("Error: tmux is required. Please install tmux first.")
+        return 1
+
+    success = True
+
+    # Install tmux plugin
+    if args.component in ("all", "tmux") and not args.skip_tmux:
+        print("Tmux Plugin Installation")
+        if args.yes or prompt_user("Install tmux plugin?"):
+            tmux_conf = Path.home() / ".tmux.conf"
+            if env["tpm"]["installed"]:
+                if args.yes or prompt_user("  Use TPM (recommended)?"):
+                    success = install_tmux_plugin_tpm(tmux_conf) and success
+                else:
+                    plugin_dir = Path.home() / ".tmux" / "plugins"
+                    success = install_tmux_plugin_manual(plugin_dir) and success
+            else:
+                print("  TPM not found. Installing manually...")
+                plugin_dir = Path.home() / ".tmux" / "plugins"
+                success = install_tmux_plugin_manual(plugin_dir) and success
+        print()
+
+    # Install Claude Code plugin
+    if args.component in ("all", "claude") and not args.skip_claude:
+        print("Claude Code Plugin Installation")
+        if not env["claude"]["installed"]:
+            print("  Skipping: Claude Code CLI not found")
+        elif args.yes or prompt_user("Install Claude Code plugin?"):
+            success = install_claude_plugin() and success
+        print()
+
+    # Summary
+    if success:
+        print("Installation complete!")
+        print("\nNext steps:")
+        print("  1. Reload tmux config: tmux source ~/.tmux.conf")
+        print("  2. If using TPM: press prefix + I to install")
+        print("  3. Start a Claude Code session to test")
+    else:
+        print("Installation completed with warnings. Check messages above.")
+
+    return 0 if success else 1
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Synchronize versions across plugin files."""
+    import subprocess
+
+    from .sync import read_pyproject_version, sync_versions
+
+    log_cli_call("sync", {"dry_run": args.dry_run, "check": args.check, "commit": args.commit})
+
+    try:
+        version = read_pyproject_version()
+        print(f"Version from pyproject.toml: {version}")
+        print()
+
+        changes, success = sync_versions(dry_run=args.dry_run, check_only=args.check)
+
+        if not changes:
+            print("All versions are in sync.")
+            return 0
+
+        print("Changes:" if not args.dry_run else "Would change:")
+        for change in changes:
+            print(f"  {change}")
+
+        if args.check:
+            print("\nVersions are out of sync!")
+            return 1
+
+        if args.commit and not args.dry_run:
+            # Stage changed files
+            subprocess.run(["git", "add", ".claude-plugin/"], check=False)
+            # Create commit
+            result = subprocess.run(
+                ["git", "commit", "-m", f"chore: sync plugin versions to {version}"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                print(f"\nCreated commit: sync plugin versions to {version}")
+            else:
+                print(f"\nWarning: Could not create commit: {result.stderr}")
+
+        return 0
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check environment and dependencies."""
+    from .doctor import format_results, run_all_checks
+
+    log_cli_call("doctor", {"json": args.json})
+
+    results = run_all_checks()
+
+    if args.json:
+        print(format_results(results, use_json=True))
+    else:
+        print("Environment Check\n")
+        print(format_results(results))
+        print()
+
+        # Summary
+        required_failed = [r for r in results if not r.ok and r.required]
+        if required_failed:
+            print(f"FAIL: {len(required_failed)} required check(s) failed")
+            return 1
+        else:
+            print("OK: All required checks passed")
+
+    return 0
+
+
+def cmd_test(args: argparse.Namespace) -> int:
+    """Run self-tests."""
+    from .testing import (
+        run_all_tests,
+        test_priority_sorting,
+        test_state_transitions,
+        validate_hooks_json,
+    )
+
+    log_cli_call("test", {"subcommand": args.test_command})
+
+    test_funcs = {
+        "states": test_state_transitions,
+        "cycle": test_priority_sorting,
+        "hooks": validate_hooks_json,
+    }
+
+    if args.test_command == "all" or args.test_command is None:
+        results, passed, failed = run_all_tests()
+    else:
+        func = test_funcs.get(args.test_command)
+        if func is None:
+            print(f"Unknown test: {args.test_command}")
+            return 1
+        results = func()
+        passed = sum(1 for r in results if r.passed)
+        failed = len(results) - passed
+
+    print("Test Results\n")
+    for r in results:
+        status = "PASS" if r.passed else "FAIL"
+        print(f"  [{status}] {r.name}")
+        if r.message and not r.passed:
+            print(f"         {r.message}")
+
+    print(f"\n{passed} passed, {failed} failed")
+    return 0 if failed == 0 else 1
+
+
 def main() -> int:
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -568,6 +752,85 @@ def main() -> int:
         help="Output status for tmux status bar",
     )
     status_parser.set_defaults(func=cmd_status)
+
+    # install command
+    install_parser = subparsers.add_parser(
+        "install",
+        help="Interactive installation wizard",
+    )
+    install_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Non-interactive mode, auto-confirm all prompts",
+    )
+    install_parser.add_argument(
+        "--component",
+        "-c",
+        choices=["all", "tmux", "claude"],
+        default="all",
+        help="Component to install",
+    )
+    install_parser.add_argument(
+        "--skip-tmux",
+        action="store_true",
+        help="Skip tmux plugin installation",
+    )
+    install_parser.add_argument(
+        "--skip-claude",
+        action="store_true",
+        help="Skip Claude Code plugin installation",
+    )
+    install_parser.set_defaults(func=cmd_install)
+
+    # sync command
+    sync_parser = subparsers.add_parser(
+        "sync",
+        help="Synchronize versions across plugin files",
+    )
+    sync_parser.add_argument(
+        "--dry-run",
+        "-n",
+        action="store_true",
+        help="Show what would change without modifying files",
+    )
+    sync_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Exit with error if versions are out of sync (for CI)",
+    )
+    sync_parser.add_argument(
+        "--commit",
+        action="store_true",
+        help="Create a git commit with changes",
+    )
+    sync_parser.set_defaults(func=cmd_sync)
+
+    # doctor command
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Check environment and dependencies",
+    )
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output in JSON format",
+    )
+    doctor_parser.set_defaults(func=cmd_doctor)
+
+    # test command
+    test_parser = subparsers.add_parser(
+        "test",
+        help="Run self-tests",
+    )
+    test_parser.add_argument(
+        "test_command",
+        nargs="?",
+        choices=["states", "cycle", "hooks", "all"],
+        default="all",
+        help="Specific test to run",
+    )
+    test_parser.set_defaults(func=cmd_test)
 
     args = parser.parse_args()
     return args.func(args)
