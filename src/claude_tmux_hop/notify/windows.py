@@ -17,30 +17,22 @@ class WindowsNotifier:
             title: Notification title
             message: Notification body
             on_click: Optional pane context for click-to-focus action
+                     (not supported on Windows - requires protocol handler setup)
 
         Returns:
             True if notification was sent successfully
+
+        Note:
+            Click-to-focus is not implemented on Windows. Implementing this feature
+            would require registering a custom URI protocol handler (e.g., tmux:)
+            which is beyond the scope of this tool. The on_click parameter is
+            accepted for API compatibility but ignored.
         """
         title_escaped = title.replace("'", "''")
         message_escaped = message.replace("'", "''")
 
-        # Build toast XML - add action if on_click provided
-        if on_click:
-            # Create a toast with a click action that runs tmux command
-            # Note: This requires a protocol handler or scheduled task setup
-            # For simplicity, we use the launch attribute to run a command
-            toast_xml = f'''
-<toast launch="tmux:switch?session={on_click.session}&amp;window={on_click.window}&amp;pane={on_click.pane_id}">
-    <visual>
-        <binding template="ToastText02">
-            <text id="1">{title_escaped}</text>
-            <text id="2">{message_escaped}</text>
-        </binding>
-    </visual>
-</toast>
-'''
-        else:
-            toast_xml = f'''
+        # Build simple toast XML (click-to-focus not supported on Windows)
+        toast_xml = f'''
 <toast>
     <visual>
         <binding template="ToastText02">
@@ -89,6 +81,13 @@ class WindowsFocusHandler:
 
         Returns:
             True if focus was successful
+
+        Note:
+            This uses WScript.Shell.AppActivate which may not work reliably with
+            all terminal applications. Windows Terminal, ConEmu, and some other
+            terminals have specific window management that may interfere with
+            COM automation. If focus fails, the user may need to manually switch
+            to the terminal window.
         """
         # First: focus the window
         focused = self._focus_window(app_name)
