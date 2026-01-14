@@ -20,6 +20,7 @@ A tool for navigating between multiple Claude Code sessions in tmux panes with p
 ```
 src/claude_tmux_hop/
   cli.py          # CLI entry (argparse subcommands)
+  parser.py       # CLI argument parser setup (argparse subcommands)
   tmux.py         # Tmux operations, PaneInfo dataclass
   priority.py     # State priority logic
   log.py          # Logging to ~/.local/state/claude-tmux-hop/hop.log
@@ -29,6 +30,7 @@ src/claude_tmux_hop/
     macos.py      # macOS: AppleScript notifications, focus, tab detection
     linux.py      # Linux: notify-send, wmctrl/xdotool, X11 detection
     windows.py    # Windows: PowerShell toast, COM focus, Win32 detection
+    terminals.py  # Terminal app detection mappings (bundle IDs, env vars)
 hooks/
   hooks.json          # Hook definitions (7 hooks)
 hop.tmux          # TPM plugin entry point
