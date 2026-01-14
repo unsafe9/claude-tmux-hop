@@ -1,0 +1,224 @@
+"""Installation logic for claude-tmux-hop."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any
+
+
+def detect_environment() -> dict[str, Any]:
+    """Detect installation environment.
+
+    Returns:
+        Dictionary with detection results for tmux, claude, tpm, fzf, and in_tmux.
+    """
+    env: dict[str, Any] = {
+        "tmux": {"installed": False, "version": None},
+        "claude": {"installed": False, "version": None},
+        "tpm": {"installed": False, "path": None},
+        "fzf": {"installed": False},
+        "in_tmux": "TMUX" in os.environ,
+    }
+
+    # Check tmux
+    try:
+        result = subprocess.run(
+            ["tmux", "-V"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            env["tmux"]["installed"] = True
+            env["tmux"]["version"] = result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Check claude CLI
+    try:
+        result = subprocess.run(
+            ["claude", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            env["claude"]["installed"] = True
+            env["claude"]["version"] = result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    # Check TPM
+    tpm_path = Path.home() / ".tmux" / "plugins" / "tpm"
+    env["tpm"]["installed"] = tpm_path.exists()
+    env["tpm"]["path"] = str(tpm_path)
+
+    # Check fzf
+    env["fzf"]["installed"] = shutil.which("fzf") is not None
+
+    return env
+
+
+def prompt_user(message: str, default: bool = True) -> bool:
+    """Interactive prompt with default value.
+
+    Args:
+        message: The prompt message to display.
+        default: Default value if user just presses Enter.
+
+    Returns:
+        True for yes, False for no.
+    """
+    suffix = " [Y/n]: " if default else " [y/N]: "
+    try:
+        response = input(message + suffix).strip().lower()
+        if not response:
+            return default
+        return response in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+
+
+def install_tmux_plugin_tpm(tmux_conf_path: Path) -> bool:
+    """Add TPM plugin line to tmux.conf.
+
+    Args:
+        tmux_conf_path: Path to the tmux.conf file.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    plugin_line = "set -g @plugin 'unsafe9/claude-tmux-hop'"
+
+    if tmux_conf_path.exists():
+        content = tmux_conf_path.read_text()
+        if plugin_line in content or "claude-tmux-hop" in content:
+            print("  Plugin already in tmux.conf")
+            return True
+
+    # Append plugin line
+    with open(tmux_conf_path, "a") as f:
+        f.write(f"\n# Claude Tmux Hop\n{plugin_line}\n")
+
+    print(f"  Added to {tmux_conf_path}")
+    print("  Run 'prefix + I' in tmux to install, or reload: tmux source ~/.tmux.conf")
+    return True
+
+
+def install_tmux_plugin_manual(plugin_dir: Path) -> bool:
+    """Install via symlink for non-TPM users.
+
+    Args:
+        plugin_dir: Directory to install the plugin into.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    # Find the package installation path
+    import claude_tmux_hop
+
+    package_path = Path(claude_tmux_hop.__file__).parent.parent.parent
+
+    target = plugin_dir / "claude-tmux-hop"
+
+    if target.exists():
+        print(f"  Plugin directory already exists: {target}")
+        return True
+
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        target.symlink_to(package_path)
+        print(f"  Created symlink: {target} -> {package_path}")
+        print("  Add to ~/.tmux.conf: run-shell '~/.tmux/plugins/claude-tmux-hop/hop.tmux'")
+        return True
+    except OSError as e:
+        print(f"  Error creating symlink: {e}")
+        return False
+
+
+def install_claude_plugin(quiet: bool = False) -> bool:
+    """Install Claude Code plugin via CLI.
+
+    Args:
+        quiet: If True, suppress informational output.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    try:
+        # Add marketplace
+        if not quiet:
+            print("  Adding marketplace...")
+        result = subprocess.run(
+            ["claude", "plugin", "marketplace", "add", "unsafe9/claude-tmux-hop"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0 and "already" not in result.stderr.lower():
+            print(f"  Warning: {result.stderr.strip()}")
+
+        # Install plugin
+        if not quiet:
+            print("  Installing plugin...")
+        result = subprocess.run(
+            ["claude", "plugin", "install", "claude-tmux-hop"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0 and "already" not in result.stderr.lower():
+            print(f"  Error: {result.stderr.strip()}")
+            return False
+
+        if not quiet:
+            print("  Claude Code plugin installed")
+        return True
+    except FileNotFoundError:
+        print("  Error: claude command not found")
+        return False
+    except subprocess.TimeoutExpired:
+        print("  Error: command timed out")
+        return False
+
+
+def verify_installation() -> dict[str, bool]:
+    """Verify all components are installed correctly.
+
+    Returns:
+        Dictionary with verification results.
+    """
+    results: dict[str, bool] = {
+        "tmux_plugin": False,
+        "claude_plugin": False,
+    }
+
+    # Check tmux plugin (look for hop.tmux or symlink)
+    plugin_paths = [
+        Path.home() / ".tmux" / "plugins" / "claude-tmux-hop",
+        Path.home() / ".tmux" / "plugins" / "claude-tmux-hop" / "hop.tmux",
+    ]
+    for path in plugin_paths:
+        if path.exists():
+            results["tmux_plugin"] = True
+            break
+
+    # Check Claude plugin
+    try:
+        result = subprocess.run(
+            ["claude", "plugin", "list"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if "claude-tmux-hop" in result.stdout:
+            results["claude_plugin"] = True
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+    return results

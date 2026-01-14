@@ -1,11 +1,15 @@
 {
   "name": "claude-tmux-hop",
   "description": "Track Claude Code sessions in tmux for quick navigation",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "author": {
     "name": "unsafe9"
   },
   "repository": "https://github.com/unsafe9/claude-tmux-hop",
   "license": "MIT",
-  "keywords": ["tmux", "navigation", "sessions"]
+  "keywords": [
+    "tmux",
+    "navigation",
+    "sessions"
+  ]
 }
