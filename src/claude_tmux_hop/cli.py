@@ -4,23 +4,39 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
+import time
 from datetime import datetime
 
-from . import __version__
 from .log import log_cli_call, log_error, log_info
-from .priority import STATE_PRIORITY, VALID_CYCLE_MODES, VALID_STATES, get_cycle_group, group_by_state, sort_all_panes
+from .parser import create_parser
+
+# Time constants for formatting
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 3600
+SECONDS_PER_DAY = 86400
+SECONDS_PER_WEEK = 604800
+
+# State icons for display
+STATE_ICONS = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}
+
+# Default status format string
+DEFAULT_STATUS_FORMAT = "{waiting:󰂜} {idle:󰄬}"
+from .priority import STATE_PRIORITY, get_cycle_group, group_by_state, sort_all_panes
+from .notify import handle_state_notifications, PaneContext
 from .tmux import (
     clear_pane_state,
     get_claude_panes_by_process,
     get_current_pane,
+    get_current_session_window,
     get_global_option,
     get_hop_panes,
     get_stale_panes,
     has_hop_state,
     is_in_tmux,
+    parse_state_set,
     run_tmux,
-    set_global_option,
     set_pane_state,
     switch_to_pane,
 )
@@ -35,8 +51,6 @@ def _format_time_ago(timestamp: int) -> str:
     Returns:
         String like "5s", "5m", "2h", "1d", "3w"
     """
-    import time
-
     if not timestamp:
         return "?"
 
@@ -46,19 +60,19 @@ def _format_time_ago(timestamp: int) -> str:
     if diff < 0:
         return "?"  # Future timestamp (shouldn't happen)
 
-    if diff < 60:
+    if diff < SECONDS_PER_MINUTE:
         return f"{diff}s"
-    elif diff < 3600:
-        minutes = diff // 60
+    elif diff < SECONDS_PER_HOUR:
+        minutes = diff // SECONDS_PER_MINUTE
         return f"{minutes}m"
-    elif diff < 86400:
-        hours = diff // 3600
+    elif diff < SECONDS_PER_DAY:
+        hours = diff // SECONDS_PER_HOUR
         return f"{hours}h"
-    elif diff < 604800:
-        days = diff // 86400
+    elif diff < SECONDS_PER_WEEK:
+        days = diff // SECONDS_PER_DAY
         return f"{days}d"
     else:
-        weeks = diff // 604800
+        weeks = diff // SECONDS_PER_WEEK
         return f"{weeks}w"
 
 
@@ -77,7 +91,7 @@ def should_auto_hop(new_state: str) -> bool:
         return False  # Disabled by default
 
     # Parse comma-separated states
-    auto_states = {s.strip().lower() for s in auto_states_str.split(",") if s.strip()}
+    auto_states = parse_state_set(auto_states_str)
 
     # Check if new state triggers auto-hop
     if new_state not in auto_states:
@@ -126,6 +140,35 @@ def do_auto_hop() -> None:
         log_error(f"auto-hop: failed to switch to {current_pane}")
 
 
+def _build_pane_context(project: str) -> PaneContext | None:
+    """Build PaneContext from current tmux environment.
+
+    Args:
+        project: Project name
+
+    Returns:
+        PaneContext if in tmux with valid pane, None otherwise
+    """
+    pane_id = os.environ.get("TMUX_PANE")
+    if not pane_id:
+        return None
+
+    # Get session and window from tmux
+    try:
+        session, window = get_current_session_window()
+        if not session:
+            return None
+
+        return PaneContext(
+            pane_id=pane_id,
+            session=session,
+            window=window if window is not None else 0,
+            project=project,
+        )
+    except Exception:
+        return None
+
+
 def cmd_register(args: argparse.Namespace) -> int:
     """Register the current pane with a state."""
     log_cli_call("register", {"state": args.state})
@@ -136,6 +179,15 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     set_pane_state(args.state)
     log_info(f"register: state set to {args.state}")
+
+    # Get project name for notifications
+    project = os.path.basename(os.getcwd())
+
+    # Build pane context for notifications and focus
+    pane_context = _build_pane_context(project)
+
+    # Handle notifications and terminal focus
+    handle_state_notifications(args.state, project, pane_context)
 
     # Check for auto-hop
     if should_auto_hop(args.state):
@@ -197,7 +249,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         next_idx = 0
 
     target = group[next_idx]
-    project = os.path.basename(target.cwd) if target.cwd else "?"
+    project = target.project
     log_info(f"cycle → {target.session}:{target.window} {project} ({target.state})")
     switch_to_pane(target.id, target.session, target.window)
     return 0
@@ -248,8 +300,8 @@ def cmd_picker_data(args: argparse.Namespace) -> int:
     sorted_panes = sort_all_panes(panes)
 
     for pane in sorted_panes:
-        icon = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}.get(pane.state, "?")
-        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
+        icon = STATE_ICONS.get(pane.state, "?")
+        project = pane.project
         time_ago = _format_time_ago(pane.timestamp)
 
         # Output: display_label<TAB>pane_id
@@ -288,7 +340,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     sorted_panes = sort_all_panes(panes)
 
     for pane in sorted_panes:
-        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
+        project = pane.project
         ts = datetime.fromtimestamp(pane.timestamp).strftime("%H:%M:%S") if pane.timestamp else "——:——:——"
         print(f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {project}")
 
@@ -364,7 +416,7 @@ def cmd_prune(args: argparse.Namespace) -> int:
     log_info(f"prune: found {len(stale)} stale panes")
 
     for pane in stale:
-        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
+        project = pane.project
 
         if args.dry_run:
             print(f"Would remove: {pane.id} ({pane.session}:{pane.window}) - {project}")
@@ -391,8 +443,6 @@ def cmd_status(args: argparse.Namespace) -> int:
         "{waiting:󰂜} {idle:󰄬} {active:󰑮}"  - include active count
         "{waiting:W} {idle:I} {active:A}"    - ASCII icons
     """
-    import re
-
     # Don't log to avoid overhead in polling scenario
 
     if not is_in_tmux():
@@ -410,7 +460,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     }
 
     # Get format string from tmux option
-    default_format = "{waiting:󰂜} {idle:󰄬}"
+    default_format = DEFAULT_STATUS_FORMAT
     format_str = get_global_option("@hop-status-format", default_format)
 
     # Parse and expand format: {state:icon} -> "icon count" or ""
@@ -432,143 +482,18 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def main() -> int:
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        prog="claude-tmux-hop",
-        description="Hop between Claude Code sessions in tmux panes",
+    parser = create_parser(
+        cmd_register=cmd_register,
+        cmd_clear=cmd_clear,
+        cmd_cycle=cmd_cycle,
+        cmd_back=cmd_back,
+        cmd_picker_data=cmd_picker_data,
+        cmd_switch=cmd_switch,
+        cmd_list=cmd_list,
+        cmd_discover=cmd_discover,
+        cmd_prune=cmd_prune,
+        cmd_status=cmd_status,
     )
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"%(prog)s {__version__}",
-    )
-
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    # register command
-    register_parser = subparsers.add_parser(
-        "register",
-        help="Register current pane with a state",
-    )
-    register_parser.add_argument(
-        "--state",
-        "-s",
-        required=True,
-        choices=VALID_STATES,
-        help="State to register",
-    )
-    register_parser.set_defaults(func=cmd_register)
-
-    # clear command
-    clear_parser = subparsers.add_parser(
-        "clear",
-        help="Clear hop state from current pane",
-    )
-    clear_parser.set_defaults(func=cmd_clear)
-
-    # cycle command
-    cycle_parser = subparsers.add_parser(
-        "cycle",
-        help="Cycle to next pane in priority order",
-    )
-    cycle_parser.add_argument(
-        "--pane",
-        "-p",
-        help="Current pane ID (passed by tmux keybinding)",
-    )
-    cycle_parser.add_argument(
-        "--mode",
-        "-m",
-        choices=VALID_CYCLE_MODES,
-        default="priority",
-        help="Cycle mode: 'priority' cycles within highest-priority group, 'flat' cycles through all panes",
-    )
-    cycle_parser.set_defaults(func=cmd_cycle)
-
-    # back command
-    back_parser = subparsers.add_parser(
-        "back",
-        help="Jump back to the previous pane",
-    )
-    back_parser.set_defaults(func=cmd_back)
-
-    # picker-data command (internal)
-    picker_data_parser = subparsers.add_parser(
-        "picker-data",
-        help="Output pane data for fzf (internal)",
-    )
-    picker_data_parser.set_defaults(func=cmd_picker_data)
-
-    # switch command (internal)
-    switch_parser = subparsers.add_parser(
-        "switch",
-        help="Switch to a specific pane (internal)",
-    )
-    switch_parser.add_argument(
-        "--pane",
-        "-p",
-        required=True,
-        help="Pane ID to switch to",
-    )
-    switch_parser.set_defaults(func=cmd_switch)
-
-    # list command
-    list_parser = subparsers.add_parser(
-        "list",
-        help="List all Claude Code panes",
-    )
-    list_parser.set_defaults(func=cmd_list)
-
-    # discover command
-    discover_parser = subparsers.add_parser(
-        "discover",
-        help="Discover and register existing Claude Code sessions",
-    )
-    discover_parser.add_argument(
-        "--dry-run",
-        "-n",
-        action="store_true",
-        help="Show what would be registered without making changes",
-    )
-    discover_parser.add_argument(
-        "--force",
-        "-f",
-        action="store_true",
-        help="Re-register panes that are already registered",
-    )
-    discover_parser.add_argument(
-        "--quiet",
-        "-q",
-        action="store_true",
-        help="Suppress output except errors",
-    )
-    discover_parser.set_defaults(func=cmd_discover)
-
-    # prune command
-    prune_parser = subparsers.add_parser(
-        "prune",
-        help="Remove stale hop state from panes no longer running Claude Code",
-    )
-    prune_parser.add_argument(
-        "--dry-run",
-        "-n",
-        action="store_true",
-        help="Show what would be removed without making changes",
-    )
-    prune_parser.add_argument(
-        "--quiet",
-        "-q",
-        action="store_true",
-        help="Suppress output except errors",
-    )
-    prune_parser.set_defaults(func=cmd_prune)
-
-    # status command
-    status_parser = subparsers.add_parser(
-        "status",
-        help="Output status for tmux status bar",
-    )
-    status_parser.set_defaults(func=cmd_status)
-
     args = parser.parse_args()
     return args.func(args)
 
