@@ -222,3 +222,100 @@ def verify_installation() -> dict[str, bool]:
         pass
 
     return results
+
+
+def update_tmux_plugin(quiet: bool = False) -> bool:
+    """Update tmux plugin via TPM or git pull.
+
+    Args:
+        quiet: If True, suppress informational output.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    plugin_dir = Path.home() / ".tmux" / "plugins" / "claude-tmux-hop"
+
+    if not plugin_dir.exists():
+        if not quiet:
+            print("  Tmux plugin not installed")
+        return False
+
+    # Check if it's a git repo (TPM-managed)
+    git_dir = plugin_dir / ".git"
+    if git_dir.exists():
+        try:
+            if not quiet:
+                print("  Updating via git pull...")
+            result = subprocess.run(
+                ["git", "-C", str(plugin_dir), "pull", "--ff-only"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                if not quiet:
+                    output = result.stdout.strip()
+                    if "Already up to date" in output:
+                        print("  Already up to date")
+                    else:
+                        print(f"  Updated: {output}")
+                return True
+            else:
+                if not quiet:
+                    print(f"  Error: {result.stderr.strip()}")
+                return False
+        except subprocess.TimeoutExpired:
+            if not quiet:
+                print("  Error: git pull timed out")
+            return False
+    elif plugin_dir.is_symlink():
+        # Symlink installation - uvx handles updates
+        if not quiet:
+            print("  Symlink installation - update via: uvx claude-tmux-hop@latest")
+        return True
+    else:
+        if not quiet:
+            print("  Unknown installation type")
+        return False
+
+
+def update_claude_plugin(quiet: bool = False) -> bool:
+    """Update Claude Code plugin via CLI.
+
+    Args:
+        quiet: If True, suppress informational output.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    try:
+        if not quiet:
+            print("  Updating Claude Code plugin...")
+        result = subprocess.run(
+            ["claude", "plugin", "update", "claude-tmux-hop"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            if not quiet:
+                output = result.stdout.strip() or "Updated successfully"
+                print(f"  {output}")
+            return True
+        else:
+            # Check if not installed
+            if "not installed" in result.stderr.lower() or "not found" in result.stderr.lower():
+                if not quiet:
+                    print("  Plugin not installed. Run: uvx claude-tmux-hop install")
+                return False
+            if not quiet:
+                print(f"  Error: {result.stderr.strip()}")
+            return False
+    except FileNotFoundError:
+        if not quiet:
+            print("  Error: claude command not found")
+        return False
+    except subprocess.TimeoutExpired:
+        if not quiet:
+            print("  Error: command timed out")
+        return False
