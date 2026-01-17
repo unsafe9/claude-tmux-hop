@@ -8,6 +8,13 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .paths import (
+    find_plugin_path,
+    find_tpm_path,
+    get_active_tmux_config,
+    get_plugin_install_dir,
+)
+
 
 def detect_environment() -> dict[str, Any]:
     """Detect installation environment.
@@ -51,10 +58,10 @@ def detect_environment() -> dict[str, Any]:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
 
-    # Check TPM
-    tpm_path = Path.home() / ".tmux" / "plugins" / "tpm"
-    env["tpm"]["installed"] = tpm_path.exists()
-    env["tpm"]["path"] = str(tpm_path)
+    # Check TPM (supports XDG and custom paths)
+    tpm_path = find_tpm_path()
+    env["tpm"]["installed"] = tpm_path is not None
+    env["tpm"]["path"] = str(tpm_path) if tpm_path else None
 
     # Check fzf
     env["fzf"]["installed"] = shutil.which("fzf") is not None
@@ -83,21 +90,28 @@ def prompt_user(message: str, default: bool = True) -> bool:
         return False
 
 
-def install_tmux_plugin_tpm(tmux_conf_path: Path) -> bool:
+def install_tmux_plugin_tpm(tmux_conf_path: Path | None = None) -> bool:
     """Add TPM plugin line to tmux.conf.
 
     Args:
-        tmux_conf_path: Path to the tmux.conf file.
+        tmux_conf_path: Path to the tmux.conf file. If None, auto-detects.
 
     Returns:
         True if successful, False otherwise.
     """
+    # Auto-detect config path if not provided
+    if tmux_conf_path is None:
+        tmux_conf_path = get_active_tmux_config()
+        if tmux_conf_path is None:
+            # Default to traditional location
+            tmux_conf_path = Path.home() / ".tmux.conf"
+
     plugin_line = "set -g @plugin 'unsafe9/claude-tmux-hop'"
 
     if tmux_conf_path.exists():
         content = tmux_conf_path.read_text()
         if plugin_line in content or "claude-tmux-hop" in content:
-            print("  Plugin already in tmux.conf")
+            print(f"  Plugin already in {tmux_conf_path}")
             return True
 
     # Append plugin line
@@ -105,19 +119,23 @@ def install_tmux_plugin_tpm(tmux_conf_path: Path) -> bool:
         f.write(f"\n# Claude Tmux Hop\n{plugin_line}\n")
 
     print(f"  Added to {tmux_conf_path}")
-    print("  Run 'prefix + I' in tmux to install, or reload: tmux source ~/.tmux.conf")
+    print(f"  Run 'prefix + I' in tmux to install, or reload: tmux source {tmux_conf_path}")
     return True
 
 
-def install_tmux_plugin_manual(plugin_dir: Path) -> bool:
+def install_tmux_plugin_manual(plugin_dir: Path | None = None) -> bool:
     """Install via symlink for non-TPM users.
 
     Args:
-        plugin_dir: Directory to install the plugin into.
+        plugin_dir: Directory to install the plugin into. If None, auto-detects.
 
     Returns:
         True if successful, False otherwise.
     """
+    # Auto-detect plugin directory if not provided
+    if plugin_dir is None:
+        plugin_dir = get_plugin_install_dir()
+
     # Find the package installation path
     import claude_tmux_hop
 
@@ -134,7 +152,7 @@ def install_tmux_plugin_manual(plugin_dir: Path) -> bool:
     try:
         target.symlink_to(package_path)
         print(f"  Created symlink: {target} -> {package_path}")
-        print("  Add to ~/.tmux.conf: run-shell '~/.tmux/plugins/claude-tmux-hop/hop.tmux'")
+        print(f"  Add to tmux.conf: run-shell '{target}/hop.tmux'")
         return True
     except OSError as e:
         print(f"  Error creating symlink: {e}")
@@ -198,15 +216,10 @@ def verify_installation() -> dict[str, bool]:
         "claude_plugin": False,
     }
 
-    # Check tmux plugin (look for hop.tmux or symlink)
-    plugin_paths = [
-        Path.home() / ".tmux" / "plugins" / "claude-tmux-hop",
-        Path.home() / ".tmux" / "plugins" / "claude-tmux-hop" / "hop.tmux",
-    ]
-    for path in plugin_paths:
-        if path.exists():
-            results["tmux_plugin"] = True
-            break
+    # Check tmux plugin (supports XDG, custom paths, traditional)
+    plugin_path = find_plugin_path("claude-tmux-hop")
+    if plugin_path:
+        results["tmux_plugin"] = True
 
     # Check Claude plugin
     try:
@@ -233,9 +246,10 @@ def update_tmux_plugin(quiet: bool = False) -> bool:
     Returns:
         True if successful, False otherwise.
     """
-    plugin_dir = Path.home() / ".tmux" / "plugins" / "claude-tmux-hop"
+    # Find plugin using path detection (supports XDG, custom paths)
+    plugin_dir = find_plugin_path("claude-tmux-hop")
 
-    if not plugin_dir.exists():
+    if not plugin_dir:
         if not quiet:
             print("  Tmux plugin not installed")
         return False
@@ -245,7 +259,7 @@ def update_tmux_plugin(quiet: bool = False) -> bool:
     if git_dir.exists():
         try:
             if not quiet:
-                print("  Updating via git pull...")
+                print(f"  Updating {plugin_dir} via git pull...")
             result = subprocess.run(
                 ["git", "-C", str(plugin_dir), "pull", "--ff-only"],
                 capture_output=True,
