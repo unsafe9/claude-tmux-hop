@@ -551,52 +551,49 @@ def cmd_install(args: argparse.Namespace) -> int:
     return 0 if success else 1
 
 
-def cmd_sync(args: argparse.Namespace) -> int:
-    """Synchronize versions across plugin files."""
-    import subprocess
+def cmd_update(args: argparse.Namespace) -> int:
+    """Update installed plugins to latest version."""
+    from .install import (
+        update_claude_plugin,
+        update_tmux_plugin,
+        verify_installation,
+    )
 
-    from .sync import read_pyproject_version, sync_versions
+    log_cli_call("update", {"component": args.component})
 
-    log_cli_call("sync", {"dry_run": args.dry_run, "check": args.check, "commit": args.commit})
+    print("Claude Tmux Hop Update\n")
 
-    try:
-        version = read_pyproject_version()
-        print(f"Version from pyproject.toml: {version}")
+    # Check what's installed
+    installed = verify_installation()
+    success = True
+
+    # Update tmux plugin
+    if args.component in ("all", "tmux"):
+        print("Tmux Plugin:")
+        if installed["tmux_plugin"]:
+            success = update_tmux_plugin() and success
+        else:
+            print("  Not installed. Run: uvx claude-tmux-hop install")
         print()
 
-        changes, success = sync_versions(dry_run=args.dry_run, check_only=args.check)
+    # Update Claude Code plugin
+    if args.component in ("all", "claude"):
+        print("Claude Code Plugin:")
+        if installed["claude_plugin"]:
+            success = update_claude_plugin() and success
+        else:
+            print("  Not installed. Run: uvx claude-tmux-hop install")
+        print()
 
-        if not changes:
-            print("All versions are in sync.")
-            return 0
+    if success:
+        print("Update complete!")
+        print("\nNext steps:")
+        print("  1. Reload tmux config: tmux source ~/.tmux.conf")
+        print("  2. Restart Claude Code sessions to apply changes")
+    else:
+        print("Update completed with warnings. Check messages above.")
 
-        print("Changes:" if not args.dry_run else "Would change:")
-        for change in changes:
-            print(f"  {change}")
-
-        if args.check:
-            print("\nVersions are out of sync!")
-            return 1
-
-        if args.commit and not args.dry_run:
-            # Stage changed files
-            subprocess.run(["git", "add", ".claude-plugin/"], check=False)
-            # Create commit
-            result = subprocess.run(
-                ["git", "commit", "-m", f"chore: sync plugin versions to {version}"],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode == 0:
-                print(f"\nCreated commit: sync plugin versions to {version}")
-            else:
-                print(f"\nWarning: Could not create commit: {result.stderr}")
-
-        return 0
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return 1
+    return 0 if success else 1
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
