@@ -8,7 +8,8 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+
+from .paths import find_plugin_path, find_tpm_path, plugin_in_config
 
 
 @dataclass
@@ -86,8 +87,8 @@ def check_claude_cli() -> CheckResult:
 
 def check_tpm() -> CheckResult:
     """Check TPM installation."""
-    tpm_path = Path.home() / ".tmux" / "plugins" / "tpm"
-    if tpm_path.exists():
+    tpm_path = find_tpm_path()
+    if tpm_path:
         return CheckResult("tpm", True, message=str(tpm_path), required=False)
     return CheckResult("tpm", False, message="Not found (optional)", required=False)
 
@@ -125,20 +126,15 @@ def check_claude_plugin() -> CheckResult:
 
 def check_tmux_plugin() -> CheckResult:
     """Check if tmux plugin is installed."""
-    plugin_paths = [
-        Path.home() / ".tmux" / "plugins" / "claude-tmux-hop",
-        Path.home() / ".tmux" / "plugins" / "claude-tmux-hop" / "hop.tmux",
-    ]
-    for path in plugin_paths:
-        if path.exists():
-            return CheckResult("tmux-plugin", True, message=str(path), required=False)
+    # Check plugin directory (supports XDG, custom paths, traditional)
+    plugin_path = find_plugin_path("claude-tmux-hop")
+    if plugin_path:
+        return CheckResult("tmux-plugin", True, message=str(plugin_path), required=False)
 
-    # Check tmux.conf for plugin line
-    tmux_conf = Path.home() / ".tmux.conf"
-    if tmux_conf.exists():
-        content = tmux_conf.read_text()
-        if "claude-tmux-hop" in content:
-            return CheckResult("tmux-plugin", True, message="In ~/.tmux.conf", required=False)
+    # Check tmux config files for plugin line
+    config_path = plugin_in_config("claude-tmux-hop")
+    if config_path:
+        return CheckResult("tmux-plugin", True, message=f"In {config_path}", required=False)
 
     return CheckResult("tmux-plugin", False, message="Not installed", required=False)
 

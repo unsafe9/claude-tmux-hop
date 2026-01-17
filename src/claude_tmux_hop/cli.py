@@ -516,17 +516,17 @@ def cmd_install(args: argparse.Namespace) -> int:
     if args.component in ("all", "tmux") and not args.skip_tmux:
         print("Tmux Plugin Installation")
         if args.yes or prompt_user("Install tmux plugin?"):
-            tmux_conf = Path.home() / ".tmux.conf"
             if env["tpm"]["installed"]:
                 if args.yes or prompt_user("  Use TPM (recommended)?"):
-                    success = install_tmux_plugin_tpm(tmux_conf) and success
+                    # Auto-detects config path (XDG, oh-my-tmux, traditional)
+                    success = install_tmux_plugin_tpm() and success
                 else:
-                    plugin_dir = Path.home() / ".tmux" / "plugins"
-                    success = install_tmux_plugin_manual(plugin_dir) and success
+                    # Auto-detects plugin directory
+                    success = install_tmux_plugin_manual() and success
             else:
                 print("  TPM not found. Installing manually...")
-                plugin_dir = Path.home() / ".tmux" / "plugins"
-                success = install_tmux_plugin_manual(plugin_dir) and success
+                # Auto-detects plugin directory
+                success = install_tmux_plugin_manual() and success
         print()
 
     # Install Claude Code plugin
@@ -542,7 +542,7 @@ def cmd_install(args: argparse.Namespace) -> int:
     if success:
         print("Installation complete!")
         print("\nNext steps:")
-        print("  1. Reload tmux config: tmux source ~/.tmux.conf")
+        print("  1. Reload tmux config (path shown above)")
         print("  2. If using TPM: press prefix + I to install")
         print("  3. Start a Claude Code session to test")
     else:
