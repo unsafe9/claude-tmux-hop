@@ -16,6 +16,39 @@ from .paths import (
 )
 
 
+class CommandResult:
+    """Result of running a command."""
+
+    def __init__(self, success: bool, stdout: str = "", stderr: str = "", error: str = ""):
+        self.success = success
+        self.stdout = stdout
+        self.stderr = stderr
+        self.error = error  # High-level error description
+
+
+def _run_command(cmd: list[str], timeout: int = 30) -> CommandResult:
+    """Run a command with standard error handling.
+
+    Args:
+        cmd: Command and arguments to run.
+        timeout: Timeout in seconds.
+
+    Returns:
+        CommandResult with success status and output.
+    """
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return CommandResult(
+            success=result.returncode == 0,
+            stdout=result.stdout.strip(),
+            stderr=result.stderr.strip(),
+        )
+    except FileNotFoundError:
+        return CommandResult(success=False, error=f"{cmd[0]} command not found")
+    except subprocess.TimeoutExpired:
+        return CommandResult(success=False, error="command timed out")
+
+
 def detect_environment() -> dict[str, Any]:
     """Detect installation environment.
 
@@ -136,41 +169,30 @@ def install_claude_plugin(quiet: bool = False) -> bool:
     Returns:
         True if successful, False otherwise.
     """
-    try:
-        # Add marketplace
-        if not quiet:
-            print("  Adding marketplace...")
-        result = subprocess.run(
-            ["claude", "plugin", "marketplace", "add", "unsafe9/claude-tmux-hop"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0 and "already" not in result.stderr.lower():
-            print(f"  Warning: {result.stderr.strip()}")
-
-        # Install plugin
-        if not quiet:
-            print("  Installing plugin...")
-        result = subprocess.run(
-            ["claude", "plugin", "install", "claude-tmux-hop"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0 and "already" not in result.stderr.lower():
-            print(f"  Error: {result.stderr.strip()}")
-            return False
-
-        if not quiet:
-            print("  Claude Code plugin installed")
-        return True
-    except FileNotFoundError:
-        print("  Error: claude command not found")
+    # Add marketplace
+    if not quiet:
+        print("  Adding marketplace...")
+    result = _run_command(["claude", "plugin", "marketplace", "add", "unsafe9/claude-tmux-hop"])
+    if result.error:
+        print(f"  Error: {result.error}")
         return False
-    except subprocess.TimeoutExpired:
-        print("  Error: command timed out")
+    if not result.success and "already" not in result.stderr.lower():
+        print(f"  Warning: {result.stderr}")
+
+    # Install plugin
+    if not quiet:
+        print("  Installing plugin...")
+    result = _run_command(["claude", "plugin", "install", "claude-tmux-hop"])
+    if result.error:
+        print(f"  Error: {result.error}")
         return False
+    if not result.success and "already" not in result.stderr.lower():
+        print(f"  Error: {result.stderr}")
+        return False
+
+    if not quiet:
+        print("  Claude Code plugin installed")
+    return True
 
 
 def verify_installation() -> dict[str, bool]:
@@ -190,17 +212,9 @@ def verify_installation() -> dict[str, bool]:
         results["tmux_plugin"] = True
 
     # Check Claude plugin
-    try:
-        result = subprocess.run(
-            ["claude", "plugin", "list"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if "claude-tmux-hop" in result.stdout:
-            results["claude_plugin"] = True
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    result = _run_command(["claude", "plugin", "list"], timeout=10)
+    if result.success and "claude-tmux-hop" in result.stdout:
+        results["claude_plugin"] = True
 
     return results
 
@@ -225,30 +239,23 @@ def update_tmux_plugin(quiet: bool = False) -> bool:
     # Check if it's a git repo (TPM-managed)
     git_dir = plugin_dir / ".git"
     if git_dir.exists():
-        try:
+        if not quiet:
+            print(f"  Updating {plugin_dir} via git pull...")
+        result = _run_command(["git", "-C", str(plugin_dir), "pull", "--ff-only"])
+        if result.error:
             if not quiet:
-                print(f"  Updating {plugin_dir} via git pull...")
-            result = subprocess.run(
-                ["git", "-C", str(plugin_dir), "pull", "--ff-only"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            if result.returncode == 0:
-                if not quiet:
-                    output = result.stdout.strip()
-                    if "Already up to date" in output:
-                        print("  Already up to date")
-                    else:
-                        print(f"  Updated: {output}")
-                return True
-            else:
-                if not quiet:
-                    print(f"  Error: {result.stderr.strip()}")
-                return False
-        except subprocess.TimeoutExpired:
+                print(f"  Error: {result.error}")
+            return False
+        if result.success:
             if not quiet:
-                print("  Error: git pull timed out")
+                if "Already up to date" in result.stdout:
+                    print("  Already up to date")
+                else:
+                    print(f"  Updated: {result.stdout}")
+            return True
+        else:
+            if not quiet:
+                print(f"  Error: {result.stderr}")
             return False
     elif plugin_dir.is_symlink():
         # Symlink installation - uvx handles updates
@@ -270,34 +277,26 @@ def update_claude_plugin(quiet: bool = False) -> bool:
     Returns:
         True if successful, False otherwise.
     """
-    try:
+    if not quiet:
+        print("  Updating Claude Code plugin...")
+    result = _run_command(["claude", "plugin", "update", "claude-tmux-hop"])
+
+    if result.error:
         if not quiet:
-            print("  Updating Claude Code plugin...")
-        result = subprocess.run(
-            ["claude", "plugin", "update", "claude-tmux-hop"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode == 0:
-            if not quiet:
-                output = result.stdout.strip() or "Updated successfully"
-                print(f"  {output}")
-            return True
-        else:
-            # Check if not installed
-            if "not installed" in result.stderr.lower() or "not found" in result.stderr.lower():
-                if not quiet:
-                    print("  Plugin not installed. Run: uvx claude-tmux-hop install")
-                return False
-            if not quiet:
-                print(f"  Error: {result.stderr.strip()}")
-            return False
-    except FileNotFoundError:
-        if not quiet:
-            print("  Error: claude command not found")
+            print(f"  Error: {result.error}")
         return False
-    except subprocess.TimeoutExpired:
+
+    if result.success:
         if not quiet:
-            print("  Error: command timed out")
+            output = result.stdout or "Updated successfully"
+            print(f"  {output}")
+        return True
+    else:
+        # Check if not installed
+        if "not installed" in result.stderr.lower() or "not found" in result.stderr.lower():
+            if not quiet:
+                print("  Plugin not installed. Run: uvx claude-tmux-hop install")
+            return False
+        if not quiet:
+            print(f"  Error: {result.stderr}")
         return False

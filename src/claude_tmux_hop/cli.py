@@ -26,6 +26,32 @@ from .tmux import (
     switch_to_pane,
 )
 
+from functools import wraps
+from typing import Callable
+
+
+def requires_tmux(silent: bool = False) -> Callable:
+    """Decorator that ensures command runs inside tmux.
+
+    Args:
+        silent: If True, exit silently with code 0. If False, print error and exit with code 1.
+    """
+    def decorator(func: Callable[[argparse.Namespace], int]) -> Callable[[argparse.Namespace], int]:
+        @wraps(func)
+        def wrapper(args: argparse.Namespace) -> int:
+            if not is_in_tmux():
+                if silent:
+                    log_info(f"{func.__name__}: not in tmux, skipping")
+                    return 0
+                else:
+                    log_error(f"{func.__name__}: not in tmux")
+                    print("Error: Not running inside tmux", file=sys.stderr)
+                    return 1
+            return func(args)
+        return wrapper
+    return decorator
+
+
 # Time constants for formatting
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 3600
@@ -131,14 +157,10 @@ def do_auto_hop() -> None:
         log_error(f"auto-hop: failed to switch to {current_pane}")
 
 
+@requires_tmux(silent=True)
 def cmd_register(args: argparse.Namespace) -> int:
     """Register the current pane with a state."""
     log_cli_call("register", {"state": args.state})
-
-    if not is_in_tmux():
-        log_info(f"register: not in tmux, skipping")
-        return 0
-
     set_pane_state(args.state)
     log_info(f"register: state set to {args.state}")
 
@@ -149,27 +171,19 @@ def cmd_register(args: argparse.Namespace) -> int:
     return 0
 
 
+@requires_tmux(silent=True)
 def cmd_clear(args: argparse.Namespace) -> int:
     """Clear the hop state from the current pane."""
     log_cli_call("clear")
-
-    if not is_in_tmux():
-        log_info("clear: not in tmux, skipping")
-        return 0
-
     clear_pane_state()
     log_info("clear: state cleared")
     return 0
 
 
+@requires_tmux(silent=False)
 def cmd_cycle(args: argparse.Namespace) -> int:
     """Cycle to the next pane in priority order."""
     log_cli_call("cycle", {"pane": args.pane} if args.pane else None)
-
-    if not is_in_tmux():
-        log_error("cycle: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
 
     # Auto-prune stale panes silently
     for pane in get_stale_panes():
@@ -207,14 +221,10 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     return 0
 
 
+@requires_tmux(silent=False)
 def cmd_back(args: argparse.Namespace) -> int:
     """Jump back to the previous pane."""
     log_cli_call("back")
-
-    if not is_in_tmux():
-        log_error("back: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
 
     # Get previous pane from global option
     previous_pane = get_global_option("@hop-previous-pane", "")
@@ -272,15 +282,10 @@ def cmd_switch(args: argparse.Namespace) -> int:
     return 0 if success else 1
 
 
+@requires_tmux(silent=False)
 def cmd_list(args: argparse.Namespace) -> int:
     """List all Claude Code panes with their state."""
     log_cli_call("list")
-
-    if not is_in_tmux():
-        log_error("list: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
-
     panes = get_hop_panes()
     if not panes:
         log_info("list: no panes found")
@@ -297,15 +302,10 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+@requires_tmux(silent=False)
 def cmd_discover(args: argparse.Namespace) -> int:
     """Discover and register existing Claude Code sessions as idle."""
     log_cli_call("discover", {"dry_run": args.dry_run, "force": args.force})
-
-    if not is_in_tmux():
-        log_error("discover: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
-
     claude_panes = get_claude_panes_by_process()
 
     if not claude_panes:
@@ -346,15 +346,10 @@ def cmd_discover(args: argparse.Namespace) -> int:
     return 0
 
 
+@requires_tmux(silent=False)
 def cmd_prune(args: argparse.Namespace) -> int:
     """Remove stale hop state from panes where Claude Code is no longer running."""
     log_cli_call("prune", {"dry_run": args.dry_run})
-
-    if not is_in_tmux():
-        log_error("prune: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
-
     stale = get_stale_panes()
 
     if not stale:
@@ -380,6 +375,7 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+@requires_tmux(silent=True)
 def cmd_status(args: argparse.Namespace) -> int:
     """Output status bar string for tmux integration.
 
@@ -392,9 +388,6 @@ def cmd_status(args: argparse.Namespace) -> int:
         "{waiting:W} {idle:I} {active:A}"    - ASCII icons
     """
     # Don't log to avoid overhead in polling scenario
-
-    if not is_in_tmux():
-        return 0  # Silent exit, no output
 
     # Get panes without validation for speed
     panes = get_hop_panes(validate=False)
@@ -607,8 +600,8 @@ def cmd_test(args: argparse.Namespace) -> int:
     return 0 if failed == 0 else 1
 
 
-def main() -> int:
-    """Main entry point."""
+def _create_parser() -> argparse.ArgumentParser:
+    """Create the argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
         prog="claude-tmux-hop",
         description="Hop between Claude Code sessions in tmux panes",
@@ -816,6 +809,12 @@ def main() -> int:
     )
     test_parser.set_defaults(func=cmd_test)
 
+    return parser
+
+
+def main() -> int:
+    """Main entry point."""
+    parser = _create_parser()
     args = parser.parse_args()
     return args.func(args)
 
