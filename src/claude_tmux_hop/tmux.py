@@ -40,6 +40,7 @@ def parse_state_set(value: str) -> set[str]:
     return {s.strip().lower() for s in value.split(",") if s.strip()}
 
 
+
 def run_tmux(*args: str, check: bool = True) -> str:
     """Run a tmux command and return stdout.
 

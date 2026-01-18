@@ -12,21 +12,9 @@ from datetime import datetime
 from pathlib import Path
 
 from .log import log_cli_call, log_error, log_info
+from .notify import PaneContext, handle_state_notifications
 from .parser import create_parser
-
-# Time constants for formatting
-SECONDS_PER_MINUTE = 60
-SECONDS_PER_HOUR = 3600
-SECONDS_PER_DAY = 86400
-SECONDS_PER_WEEK = 604800
-
-# State icons for display
-STATE_ICONS = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}
-
-# Default status format string
-DEFAULT_STATUS_FORMAT = "{waiting:󰂜} {idle:󰄬}"
 from .priority import STATE_PRIORITY, get_cycle_group, group_by_state, sort_all_panes
-from .notify import handle_state_notifications, PaneContext
 from .tmux import (
     clear_pane_state,
     get_claude_panes_by_process,
@@ -42,6 +30,18 @@ from .tmux import (
     set_pane_state,
     switch_to_pane,
 )
+
+# Time constants for formatting
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 3600
+SECONDS_PER_DAY = 86400
+SECONDS_PER_WEEK = 604800
+
+# State icons for display
+STATE_ICONS = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}
+
+# Default status format string
+DEFAULT_STATUS_FORMAT = "{waiting:󰂜} {idle:󰄬}"
 
 
 def _format_time_ago(timestamp: int) -> str:
@@ -251,8 +251,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         next_idx = 0
 
     target = group[next_idx]
-    project = target.project
-    log_info(f"cycle → {target.session}:{target.window} {project} ({target.state})")
+    log_info(f"cycle → {target.session}:{target.window} {target.project} ({target.state})")
     switch_to_pane(target.id, target.session, target.window)
     return 0
 
@@ -303,12 +302,11 @@ def cmd_picker_data(args: argparse.Namespace) -> int:
 
     for pane in sorted_panes:
         icon = STATE_ICONS.get(pane.state, "?")
-        project = pane.project
         time_ago = _format_time_ago(pane.timestamp)
 
         # Output: display_label<TAB>pane_id
         # fzf will show the label but we extract pane_id on selection
-        label = f"{icon} {project} ({pane.session}:{pane.window}) [{time_ago}]"
+        label = f"{icon} {pane.project} ({pane.session}:{pane.window}) [{time_ago}]"
         print(f"{label}\t{pane.id}")
 
     return 0
@@ -342,9 +340,8 @@ def cmd_list(args: argparse.Namespace) -> int:
     sorted_panes = sort_all_panes(panes)
 
     for pane in sorted_panes:
-        project = pane.project
         ts = datetime.fromtimestamp(pane.timestamp).strftime("%H:%M:%S") if pane.timestamp else "——:——:——"
-        print(f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {project}")
+        print(f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {pane.project}")
 
     return 0
 
@@ -418,15 +415,13 @@ def cmd_prune(args: argparse.Namespace) -> int:
     log_info(f"prune: found {len(stale)} stale panes")
 
     for pane in stale:
-        project = pane.project
-
         if args.dry_run:
-            print(f"Would remove: {pane.id} ({pane.session}:{pane.window}) - {project}")
+            print(f"Would remove: {pane.id} ({pane.session}:{pane.window}) - {pane.project}")
         else:
             clear_pane_state(pane.id)
             log_info(f"prune: cleared {pane.id}")
             if not args.quiet:
-                print(f"Removed: {pane.id} ({pane.session}:{pane.window}) - {project}")
+                print(f"Removed: {pane.id} ({pane.session}:{pane.window}) - {pane.project}")
 
     if not args.dry_run and not args.quiet:
         print(f"\nPruned {len(stale)} stale pane(s)")

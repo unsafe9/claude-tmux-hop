@@ -8,9 +8,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from .doctor import check_claude_cli, check_fzf, check_tmux, check_tpm
 from .paths import (
     find_plugin_path,
-    find_tpm_path,
     get_active_tmux_config,
     get_plugin_install_dir,
 )
@@ -22,51 +22,19 @@ def detect_environment() -> dict[str, Any]:
     Returns:
         Dictionary with detection results for tmux, claude, tpm, fzf, and in_tmux.
     """
-    env: dict[str, Any] = {
-        "tmux": {"installed": False, "version": None},
-        "claude": {"installed": False, "version": None},
-        "tpm": {"installed": False, "path": None},
-        "fzf": {"installed": False},
+    # Use doctor.py checks to avoid duplication
+    tmux_result = check_tmux()
+    claude_result = check_claude_cli()
+    tpm_result = check_tpm()
+    fzf_result = check_fzf()
+
+    return {
+        "tmux": {"installed": tmux_result.ok, "version": tmux_result.version},
+        "claude": {"installed": claude_result.ok, "version": claude_result.version},
+        "tpm": {"installed": tpm_result.ok, "path": tpm_result.message},
+        "fzf": {"installed": fzf_result.ok},
         "in_tmux": "TMUX" in os.environ,
     }
-
-    # Check tmux
-    try:
-        result = subprocess.run(
-            ["tmux", "-V"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            env["tmux"]["installed"] = True
-            env["tmux"]["version"] = result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # Check claude CLI
-    try:
-        result = subprocess.run(
-            ["claude", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            env["claude"]["installed"] = True
-            env["claude"]["version"] = result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
-    # Check TPM (supports XDG and custom paths)
-    tpm_path = find_tpm_path()
-    env["tpm"]["installed"] = tpm_path is not None
-    env["tpm"]["path"] = str(tpm_path) if tpm_path else None
-
-    # Check fzf
-    env["fzf"]["installed"] = shutil.which("fzf") is not None
-
-    return env
 
 
 def prompt_user(message: str, default: bool = True) -> bool:
