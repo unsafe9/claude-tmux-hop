@@ -610,45 +610,6 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_test(args: argparse.Namespace) -> int:
-    """Run self-tests."""
-    from .testing import (
-        run_all_tests,
-        test_priority_sorting,
-        test_state_transitions,
-        validate_hooks_json,
-    )
-
-    log_cli_call("test", {"subcommand": args.test_command})
-
-    test_funcs = {
-        "states": test_state_transitions,
-        "cycle": test_priority_sorting,
-        "hooks": validate_hooks_json,
-    }
-
-    if args.test_command == "all" or args.test_command is None:
-        results, passed, failed = run_all_tests()
-    else:
-        func = test_funcs.get(args.test_command)
-        if func is None:
-            print(f"Unknown test: {args.test_command}")
-            return 1
-        results = func()
-        passed = sum(1 for r in results if r.passed)
-        failed = len(results) - passed
-
-    print("Test Results\n")
-    for r in results:
-        status = "PASS" if r.passed else "FAIL"
-        print(f"  [{status}] {r.name}")
-        if r.message and not r.passed:
-            print(f"         {r.message}")
-
-    print(f"\n{passed} passed, {failed} failed")
-    return 0 if failed == 0 else 1
-
-
 def main() -> int:
     """Main entry point."""
     parser = create_parser(
