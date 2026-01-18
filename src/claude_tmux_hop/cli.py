@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
+import time
 from datetime import datetime
 
 from . import __version__
-from pathlib import Path
-
 from .log import log_cli_call, log_error, log_info
 from .priority import STATE_PRIORITY, VALID_CYCLE_MODES, VALID_STATES, get_cycle_group, group_by_state, sort_all_panes
 from .tmux import (
@@ -22,10 +22,15 @@ from .tmux import (
     has_hop_state,
     is_in_tmux,
     run_tmux,
-    set_global_option,
     set_pane_state,
     switch_to_pane,
 )
+
+# Time constants for formatting
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 3600
+SECONDS_PER_DAY = 86400
+SECONDS_PER_WEEK = 604800
 
 
 def _format_time_ago(timestamp: int) -> str:
@@ -37,8 +42,6 @@ def _format_time_ago(timestamp: int) -> str:
     Returns:
         String like "5s", "5m", "2h", "1d", "3w"
     """
-    import time
-
     if not timestamp:
         return "?"
 
@@ -48,19 +51,19 @@ def _format_time_ago(timestamp: int) -> str:
     if diff < 0:
         return "?"  # Future timestamp (shouldn't happen)
 
-    if diff < 60:
+    if diff < SECONDS_PER_MINUTE:
         return f"{diff}s"
-    elif diff < 3600:
-        minutes = diff // 60
+    elif diff < SECONDS_PER_HOUR:
+        minutes = diff // SECONDS_PER_MINUTE
         return f"{minutes}m"
-    elif diff < 86400:
-        hours = diff // 3600
+    elif diff < SECONDS_PER_DAY:
+        hours = diff // SECONDS_PER_HOUR
         return f"{hours}h"
-    elif diff < 604800:
-        days = diff // 86400
+    elif diff < SECONDS_PER_WEEK:
+        days = diff // SECONDS_PER_DAY
         return f"{days}d"
     else:
-        weeks = diff // 604800
+        weeks = diff // SECONDS_PER_WEEK
         return f"{weeks}w"
 
 
@@ -199,8 +202,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         next_idx = 0
 
     target = group[next_idx]
-    project = os.path.basename(target.cwd) if target.cwd else "?"
-    log_info(f"cycle → {target.session}:{target.window} {project} ({target.state})")
+    log_info(f"cycle → {target.session}:{target.window} {target.project} ({target.state})")
     switch_to_pane(target.id, target.session, target.window)
     return 0
 
@@ -251,12 +253,11 @@ def cmd_picker_data(args: argparse.Namespace) -> int:
 
     for pane in sorted_panes:
         icon = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}.get(pane.state, "?")
-        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
         time_ago = _format_time_ago(pane.timestamp)
 
         # Output: display_label<TAB>pane_id
         # fzf will show the label but we extract pane_id on selection
-        label = f"{icon} {project} ({pane.session}:{pane.window}) [{time_ago}]"
+        label = f"{icon} {pane.project} ({pane.session}:{pane.window}) [{time_ago}]"
         print(f"{label}\t{pane.id}")
 
     return 0
@@ -290,9 +291,8 @@ def cmd_list(args: argparse.Namespace) -> int:
     sorted_panes = sort_all_panes(panes)
 
     for pane in sorted_panes:
-        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
         ts = datetime.fromtimestamp(pane.timestamp).strftime("%H:%M:%S") if pane.timestamp else "——:——:——"
-        print(f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {project}")
+        print(f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {pane.project}")
 
     return 0
 
@@ -366,15 +366,13 @@ def cmd_prune(args: argparse.Namespace) -> int:
     log_info(f"prune: found {len(stale)} stale panes")
 
     for pane in stale:
-        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
-
         if args.dry_run:
-            print(f"Would remove: {pane.id} ({pane.session}:{pane.window}) - {project}")
+            print(f"Would remove: {pane.id} ({pane.session}:{pane.window}) - {pane.project}")
         else:
             clear_pane_state(pane.id)
             log_info(f"prune: cleared {pane.id}")
             if not args.quiet:
-                print(f"Removed: {pane.id} ({pane.session}:{pane.window}) - {project}")
+                print(f"Removed: {pane.id} ({pane.session}:{pane.window}) - {pane.project}")
 
     if not args.dry_run and not args.quiet:
         print(f"\nPruned {len(stale)} stale pane(s)")
@@ -393,8 +391,6 @@ def cmd_status(args: argparse.Namespace) -> int:
         "{waiting:󰂜} {idle:󰄬} {active:󰑮}"  - include active count
         "{waiting:W} {idle:I} {active:A}"    - ASCII icons
     """
-    import re
-
     # Don't log to avoid overhead in polling scenario
 
     if not is_in_tmux():
