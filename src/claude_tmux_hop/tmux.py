@@ -22,6 +22,11 @@ class PaneInfo:
     session: str  # Session name
     window: int  # Window index
 
+    @property
+    def project(self) -> str:
+        """Get project name from cwd (basename)."""
+        return os.path.basename(self.cwd) if self.cwd else "unknown"
+
 
 def run_tmux(*args: str, check: bool = True) -> str:
     """Run a tmux command and return stdout.
@@ -50,23 +55,6 @@ def run_tmux(*args: str, check: bool = True) -> str:
         ) from e
 
 
-def get_tmux_option(option: str, default: str = "") -> str:
-    """Get a tmux option value with fallback.
-
-    Args:
-        option: The tmux option name (e.g., "@hop-status-format")
-        default: Default value if option is not set
-
-    Returns:
-        The option value or default
-    """
-    try:
-        result = run_tmux("show-option", "-gqv", option, check=False)
-        return result if result else default
-    except RuntimeError:
-        return default
-
-
 def get_current_pane() -> str | None:
     """Get the current pane ID from tmux.
 
@@ -83,37 +71,6 @@ def get_current_pane() -> str | None:
 def is_in_tmux() -> bool:
     """Check if we're running inside tmux."""
     return "TMUX" in os.environ
-
-
-def get_tmux_version() -> tuple[int, int]:
-    """Get the tmux version as (major, minor).
-
-    Returns:
-        Tuple of (major, minor) version numbers, e.g., (3, 2)
-        Returns (0, 0) if version cannot be determined
-    """
-    import re
-
-    try:
-        result = subprocess.run(
-            ["tmux", "-V"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        # Parse "tmux 3.2" or "tmux 3.2a"
-        match = re.search(r"tmux\s+(\d+)\.(\d+)", result.stdout)
-        if match:
-            return int(match.group(1)), int(match.group(2))
-    except (subprocess.CalledProcessError, OSError, ValueError):
-        pass
-    return (0, 0)
-
-
-def supports_popup() -> bool:
-    """Check if tmux supports display-popup (requires 3.2+)."""
-    major, minor = get_tmux_version()
-    return (major, minor) >= (3, 2)
 
 
 def get_current_session_window() -> tuple[str, int | None]:
@@ -265,38 +222,6 @@ def _is_interactive_claude_on_tty(tty: str) -> bool:
         return False
 
 
-def get_running_claude_pane_ids() -> set[str]:
-    """Get the set of pane IDs currently running interactive Claude Code.
-
-    Uses ps to check processes on each pane's tty for the 'claude' command.
-    Excludes panes running Claude with -p/--print (non-interactive mode).
-
-    Returns:
-        Set of pane IDs (e.g., {"%0", "%5"}) running Claude Code.
-    """
-    output = run_tmux(
-        "list-panes",
-        "-a",
-        "-F",
-        "#{pane_id}\t#{pane_tty}",
-    )
-
-    pane_ids = set()
-    for line in output.split("\n"):
-        if not line:
-            continue
-
-        parts = line.split("\t")
-        if len(parts) < 2:
-            continue
-
-        pane_id, tty = parts
-        if tty and _is_interactive_claude_on_tty(tty):
-            pane_ids.add(pane_id)
-
-    return pane_ids
-
-
 def get_claude_panes_by_process() -> list[dict]:
     """Find all panes running interactive Claude Code by checking processes.
 
@@ -333,6 +258,15 @@ def get_claude_panes_by_process() -> list[dict]:
             })
 
     return panes
+
+
+def get_running_claude_pane_ids() -> set[str]:
+    """Get the set of pane IDs currently running interactive Claude Code.
+
+    Returns:
+        Set of pane IDs (e.g., {"%0", "%5"}) running Claude Code.
+    """
+    return {p["id"] for p in get_claude_panes_by_process()}
 
 
 def get_hop_panes(validate: bool = True) -> list[PaneInfo]:

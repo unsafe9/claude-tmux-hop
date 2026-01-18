@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
+import time
 from datetime import datetime
 
 from . import __version__
@@ -20,10 +22,41 @@ from .tmux import (
     has_hop_state,
     is_in_tmux,
     run_tmux,
-    set_global_option,
     set_pane_state,
     switch_to_pane,
 )
+
+from functools import wraps
+from typing import Callable
+
+
+def requires_tmux(silent: bool = False) -> Callable:
+    """Decorator that ensures command runs inside tmux.
+
+    Args:
+        silent: If True, exit silently with code 0. If False, print error and exit with code 1.
+    """
+    def decorator(func: Callable[[argparse.Namespace], int]) -> Callable[[argparse.Namespace], int]:
+        @wraps(func)
+        def wrapper(args: argparse.Namespace) -> int:
+            if not is_in_tmux():
+                if silent:
+                    log_info(f"{func.__name__}: not in tmux, skipping")
+                    return 0
+                else:
+                    log_error(f"{func.__name__}: not in tmux")
+                    print("Error: Not running inside tmux", file=sys.stderr)
+                    return 1
+            return func(args)
+        return wrapper
+    return decorator
+
+
+# Time constants for formatting
+SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 3600
+SECONDS_PER_DAY = 86400
+SECONDS_PER_WEEK = 604800
 
 
 def _format_time_ago(timestamp: int) -> str:
@@ -35,8 +68,6 @@ def _format_time_ago(timestamp: int) -> str:
     Returns:
         String like "5s", "5m", "2h", "1d", "3w"
     """
-    import time
-
     if not timestamp:
         return "?"
 
@@ -46,19 +77,19 @@ def _format_time_ago(timestamp: int) -> str:
     if diff < 0:
         return "?"  # Future timestamp (shouldn't happen)
 
-    if diff < 60:
+    if diff < SECONDS_PER_MINUTE:
         return f"{diff}s"
-    elif diff < 3600:
-        minutes = diff // 60
+    elif diff < SECONDS_PER_HOUR:
+        minutes = diff // SECONDS_PER_MINUTE
         return f"{minutes}m"
-    elif diff < 86400:
-        hours = diff // 3600
+    elif diff < SECONDS_PER_DAY:
+        hours = diff // SECONDS_PER_HOUR
         return f"{hours}h"
-    elif diff < 604800:
-        days = diff // 86400
+    elif diff < SECONDS_PER_WEEK:
+        days = diff // SECONDS_PER_DAY
         return f"{days}d"
     else:
-        weeks = diff // 604800
+        weeks = diff // SECONDS_PER_WEEK
         return f"{weeks}w"
 
 
@@ -126,14 +157,10 @@ def do_auto_hop() -> None:
         log_error(f"auto-hop: failed to switch to {current_pane}")
 
 
+@requires_tmux(silent=True)
 def cmd_register(args: argparse.Namespace) -> int:
     """Register the current pane with a state."""
     log_cli_call("register", {"state": args.state})
-
-    if not is_in_tmux():
-        log_info(f"register: not in tmux, skipping")
-        return 0
-
     set_pane_state(args.state)
     log_info(f"register: state set to {args.state}")
 
@@ -144,27 +171,19 @@ def cmd_register(args: argparse.Namespace) -> int:
     return 0
 
 
+@requires_tmux(silent=True)
 def cmd_clear(args: argparse.Namespace) -> int:
     """Clear the hop state from the current pane."""
     log_cli_call("clear")
-
-    if not is_in_tmux():
-        log_info("clear: not in tmux, skipping")
-        return 0
-
     clear_pane_state()
     log_info("clear: state cleared")
     return 0
 
 
+@requires_tmux(silent=False)
 def cmd_cycle(args: argparse.Namespace) -> int:
     """Cycle to the next pane in priority order."""
     log_cli_call("cycle", {"pane": args.pane} if args.pane else None)
-
-    if not is_in_tmux():
-        log_error("cycle: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
 
     # Auto-prune stale panes silently
     for pane in get_stale_panes():
@@ -197,20 +216,15 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         next_idx = 0
 
     target = group[next_idx]
-    project = os.path.basename(target.cwd) if target.cwd else "?"
-    log_info(f"cycle → {target.session}:{target.window} {project} ({target.state})")
+    log_info(f"cycle → {target.session}:{target.window} {target.project} ({target.state})")
     switch_to_pane(target.id, target.session, target.window)
     return 0
 
 
+@requires_tmux(silent=False)
 def cmd_back(args: argparse.Namespace) -> int:
     """Jump back to the previous pane."""
     log_cli_call("back")
-
-    if not is_in_tmux():
-        log_error("back: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
 
     # Get previous pane from global option
     previous_pane = get_global_option("@hop-previous-pane", "")
@@ -249,12 +263,11 @@ def cmd_picker_data(args: argparse.Namespace) -> int:
 
     for pane in sorted_panes:
         icon = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}.get(pane.state, "?")
-        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
         time_ago = _format_time_ago(pane.timestamp)
 
         # Output: display_label<TAB>pane_id
         # fzf will show the label but we extract pane_id on selection
-        label = f"{icon} {project} ({pane.session}:{pane.window}) [{time_ago}]"
+        label = f"{icon} {pane.project} ({pane.session}:{pane.window}) [{time_ago}]"
         print(f"{label}\t{pane.id}")
 
     return 0
@@ -269,15 +282,10 @@ def cmd_switch(args: argparse.Namespace) -> int:
     return 0 if success else 1
 
 
+@requires_tmux(silent=False)
 def cmd_list(args: argparse.Namespace) -> int:
     """List all Claude Code panes with their state."""
     log_cli_call("list")
-
-    if not is_in_tmux():
-        log_error("list: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
-
     panes = get_hop_panes()
     if not panes:
         log_info("list: no panes found")
@@ -288,22 +296,16 @@ def cmd_list(args: argparse.Namespace) -> int:
     sorted_panes = sort_all_panes(panes)
 
     for pane in sorted_panes:
-        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
         ts = datetime.fromtimestamp(pane.timestamp).strftime("%H:%M:%S") if pane.timestamp else "——:——:——"
-        print(f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {project}")
+        print(f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {pane.project}")
 
     return 0
 
 
+@requires_tmux(silent=False)
 def cmd_discover(args: argparse.Namespace) -> int:
     """Discover and register existing Claude Code sessions as idle."""
     log_cli_call("discover", {"dry_run": args.dry_run, "force": args.force})
-
-    if not is_in_tmux():
-        log_error("discover: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
-
     claude_panes = get_claude_panes_by_process()
 
     if not claude_panes:
@@ -344,15 +346,10 @@ def cmd_discover(args: argparse.Namespace) -> int:
     return 0
 
 
+@requires_tmux(silent=False)
 def cmd_prune(args: argparse.Namespace) -> int:
     """Remove stale hop state from panes where Claude Code is no longer running."""
     log_cli_call("prune", {"dry_run": args.dry_run})
-
-    if not is_in_tmux():
-        log_error("prune: not in tmux")
-        print("Error: Not running inside tmux", file=sys.stderr)
-        return 1
-
     stale = get_stale_panes()
 
     if not stale:
@@ -364,15 +361,13 @@ def cmd_prune(args: argparse.Namespace) -> int:
     log_info(f"prune: found {len(stale)} stale panes")
 
     for pane in stale:
-        project = os.path.basename(pane.cwd) if pane.cwd else "unknown"
-
         if args.dry_run:
-            print(f"Would remove: {pane.id} ({pane.session}:{pane.window}) - {project}")
+            print(f"Would remove: {pane.id} ({pane.session}:{pane.window}) - {pane.project}")
         else:
             clear_pane_state(pane.id)
             log_info(f"prune: cleared {pane.id}")
             if not args.quiet:
-                print(f"Removed: {pane.id} ({pane.session}:{pane.window}) - {project}")
+                print(f"Removed: {pane.id} ({pane.session}:{pane.window}) - {pane.project}")
 
     if not args.dry_run and not args.quiet:
         print(f"\nPruned {len(stale)} stale pane(s)")
@@ -380,6 +375,7 @@ def cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+@requires_tmux(silent=True)
 def cmd_status(args: argparse.Namespace) -> int:
     """Output status bar string for tmux integration.
 
@@ -391,12 +387,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         "{waiting:󰂜} {idle:󰄬} {active:󰑮}"  - include active count
         "{waiting:W} {idle:I} {active:A}"    - ASCII icons
     """
-    import re
-
     # Don't log to avoid overhead in polling scenario
-
-    if not is_in_tmux():
-        return 0  # Silent exit, no output
 
     # Get panes without validation for speed
     panes = get_hop_panes(validate=False)
@@ -430,8 +421,187 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
-    """Main entry point."""
+def cmd_install(args: argparse.Namespace) -> int:
+    """Interactive installation wizard."""
+    from .install import (
+        detect_environment,
+        install_claude_plugin,
+        install_tmux_plugin_manual,
+        install_tmux_plugin_tpm,
+        prompt_user,
+    )
+
+    log_cli_call("install", {"yes": args.yes, "component": args.component})
+
+    print("Claude Tmux Hop Installation\n")
+
+    # Detect environment
+    print("Detecting environment...")
+    env = detect_environment()
+
+    print(f"  tmux: {'OK' if env['tmux']['installed'] else 'NOT FOUND'}")
+    print(f"  claude: {'OK' if env['claude']['installed'] else 'NOT FOUND'}")
+    print(f"  TPM: {'OK' if env['tpm']['installed'] else 'NOT FOUND'}")
+    print(f"  fzf: {'OK' if env['fzf']['installed'] else 'NOT FOUND (optional)'}")
+    print()
+
+    if not env["tmux"]["installed"]:
+        print("Error: tmux is required. Please install tmux first.")
+        return 1
+
+    success = True
+
+    # Install tmux plugin
+    if args.component in ("all", "tmux") and not args.skip_tmux:
+        print("Tmux Plugin Installation")
+        if args.yes or prompt_user("Install tmux plugin?"):
+            if env["tpm"]["installed"]:
+                if args.yes or prompt_user("  Use TPM (recommended)?"):
+                    # Auto-detects config path (XDG, oh-my-tmux, traditional)
+                    success = install_tmux_plugin_tpm() and success
+                else:
+                    # Auto-detects plugin directory
+                    success = install_tmux_plugin_manual() and success
+            else:
+                print("  TPM not found. Installing manually...")
+                # Auto-detects plugin directory
+                success = install_tmux_plugin_manual() and success
+        print()
+
+    # Install Claude Code plugin
+    if args.component in ("all", "claude") and not args.skip_claude:
+        print("Claude Code Plugin Installation")
+        if not env["claude"]["installed"]:
+            print("  Skipping: Claude Code CLI not found")
+        elif args.yes or prompt_user("Install Claude Code plugin?"):
+            success = install_claude_plugin() and success
+        print()
+
+    # Summary
+    if success:
+        print("Installation complete!")
+        print("\nNext steps:")
+        print("  1. Reload tmux config (path shown above)")
+        print("  2. If using TPM: press prefix + I to install")
+        print("  3. Start a Claude Code session to test")
+    else:
+        print("Installation completed with warnings. Check messages above.")
+
+    return 0 if success else 1
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    """Update installed plugins to latest version."""
+    from .install import (
+        update_claude_plugin,
+        update_tmux_plugin,
+        verify_installation,
+    )
+
+    log_cli_call("update", {"component": args.component})
+
+    print("Claude Tmux Hop Update\n")
+
+    # Check what's installed
+    installed = verify_installation()
+    success = True
+
+    # Update tmux plugin
+    if args.component in ("all", "tmux"):
+        print("Tmux Plugin:")
+        if installed["tmux_plugin"]:
+            success = update_tmux_plugin() and success
+        else:
+            print("  Not installed. Run: uvx claude-tmux-hop install")
+        print()
+
+    # Update Claude Code plugin
+    if args.component in ("all", "claude"):
+        print("Claude Code Plugin:")
+        if installed["claude_plugin"]:
+            success = update_claude_plugin() and success
+        else:
+            print("  Not installed. Run: uvx claude-tmux-hop install")
+        print()
+
+    if success:
+        print("Update complete!")
+        print("\nNext steps:")
+        print("  1. Reload tmux config: tmux source ~/.tmux.conf")
+        print("  2. Restart Claude Code sessions to apply changes")
+    else:
+        print("Update completed with warnings. Check messages above.")
+
+    return 0 if success else 1
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Check environment and dependencies."""
+    from .doctor import format_results, run_all_checks
+
+    log_cli_call("doctor", {"json": args.json})
+
+    results = run_all_checks()
+
+    if args.json:
+        print(format_results(results, use_json=True))
+    else:
+        print("Environment Check\n")
+        print(format_results(results))
+        print()
+
+        # Summary
+        required_failed = [r for r in results if not r.ok and r.required]
+        if required_failed:
+            print(f"FAIL: {len(required_failed)} required check(s) failed")
+            return 1
+        else:
+            print("OK: All required checks passed")
+
+    return 0
+
+
+def cmd_test(args: argparse.Namespace) -> int:
+    """Run self-tests."""
+    from .testing import (
+        run_all_tests,
+        test_priority_sorting,
+        test_state_transitions,
+        validate_hooks_json,
+    )
+
+    log_cli_call("test", {"subcommand": args.test_command})
+
+    test_funcs = {
+        "states": test_state_transitions,
+        "cycle": test_priority_sorting,
+        "hooks": validate_hooks_json,
+    }
+
+    if args.test_command == "all" or args.test_command is None:
+        results, passed, failed = run_all_tests()
+    else:
+        func = test_funcs.get(args.test_command)
+        if func is None:
+            print(f"Unknown test: {args.test_command}")
+            return 1
+        results = func()
+        passed = sum(1 for r in results if r.passed)
+        failed = len(results) - passed
+
+    print("Test Results\n")
+    for r in results:
+        status = "PASS" if r.passed else "FAIL"
+        print(f"  [{status}] {r.name}")
+        if r.message and not r.passed:
+            print(f"         {r.message}")
+
+    print(f"\n{passed} passed, {failed} failed")
+    return 0 if failed == 0 else 1
+
+
+def _create_parser() -> argparse.ArgumentParser:
+    """Create the argument parser with all subcommands."""
     parser = argparse.ArgumentParser(
         prog="claude-tmux-hop",
         description="Hop between Claude Code sessions in tmux panes",
@@ -569,6 +739,82 @@ def main() -> int:
     )
     status_parser.set_defaults(func=cmd_status)
 
+    # install command
+    install_parser = subparsers.add_parser(
+        "install",
+        help="Interactive installation wizard",
+    )
+    install_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Non-interactive mode, auto-confirm all prompts",
+    )
+    install_parser.add_argument(
+        "--component",
+        "-c",
+        choices=["all", "tmux", "claude"],
+        default="all",
+        help="Component to install",
+    )
+    install_parser.add_argument(
+        "--skip-tmux",
+        action="store_true",
+        help="Skip tmux plugin installation",
+    )
+    install_parser.add_argument(
+        "--skip-claude",
+        action="store_true",
+        help="Skip Claude Code plugin installation",
+    )
+    install_parser.set_defaults(func=cmd_install)
+
+    # update command
+    update_parser = subparsers.add_parser(
+        "update",
+        help="Update installed plugins to latest version",
+    )
+    update_parser.add_argument(
+        "--component",
+        "-c",
+        choices=["all", "tmux", "claude"],
+        default="all",
+        help="Component to update (default: all)",
+    )
+    update_parser.set_defaults(func=cmd_update)
+
+    # doctor command
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Check environment and dependencies",
+    )
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output in JSON format",
+    )
+    doctor_parser.set_defaults(func=cmd_doctor)
+
+    # test command
+    test_parser = subparsers.add_parser(
+        "test",
+        help="Run self-tests",
+    )
+    test_parser.add_argument(
+        "test_command",
+        nargs="?",
+        choices=["states", "cycle", "hooks", "all"],
+        default="all",
+        help="Specific test to run",
+    )
+    test_parser.set_defaults(func=cmd_test)
+
+    return parser
+
+
+def main() -> int:
+    """Main entry point."""
+    parser = _create_parser()
     args = parser.parse_args()
     return args.func(args)
 
