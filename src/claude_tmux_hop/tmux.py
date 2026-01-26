@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from .log import log_debug, log_error, log_info
 
 # Dialog detection constants
-DIALOG_CURSOR = "❯"  # Ink selection cursor (U+276F)
-PROMPT_CHAR = ">"  # Claude Code input prompt (U+003E)
+PROMPT_CHAR = "❯"  # Claude Code input prompt / Ink selection cursor (U+276F)
+STATUS_SEPARATOR = "─"  # Box drawing character in status bar separator (U+2500)
 WAITING_STALE_THRESHOLD = 3  # Seconds before checking a "waiting" pane
 
 
@@ -447,13 +447,24 @@ def capture_pane_content(pane_id: str, last_lines: int = 15) -> str:
         return ""
 
 
+def _is_separator_line(stripped: str) -> bool:
+    """Check if a line is a Claude Code status bar separator (all ─ chars)."""
+    return bool(stripped) and all(c == STATUS_SEPARATOR for c in stripped)
+
+
 def has_active_dialog(content: str) -> bool:
     """Check if a Claude Code interactive dialog is active in pane content.
 
-    Phase 1: If the selection cursor (❯) is present, a dialog is active.
-    Phase 2: If absent, check if the last non-empty line is the Claude Code
-              prompt (> or > ...). If so, the dialog was dismissed.
-    Fallback: Neither found → ambiguous → assume dialog is still active.
+    Since the input prompt (❯) and the Ink selection cursor (❯) are the same
+    character, detection is positional rather than character-based.
+
+    Claude Code layout when prompt is visible (dialog dismissed):
+        [content] → ─── → ❯ [input] → ─── → [status metadata]
+    Layout when a dialog is active:
+        [content] → [? question / ❯ option / options] → ─── → [status metadata]
+
+    Scans from the bottom, skips the status bar, and checks whether the first
+    content line above the separator is the input prompt (❯).
 
     Args:
         content: Captured pane content (last N lines)
@@ -464,21 +475,29 @@ def has_active_dialog(content: str) -> bool:
     if not content or not content.strip():
         return True  # Conservative: empty/whitespace = assume active
 
-    # Phase 1: Selection cursor present → dialog active
-    if DIALOG_CURSOR in content:
-        return True
-
-    # Phase 2: Check last non-empty line for prompt
     lines = content.splitlines()
+
+    # Scan from bottom: skip status metadata, find first separator,
+    # then check whether the line above it is the input prompt.
+    found_separator = False
     for line in reversed(lines):
         stripped = line.strip()
-        if stripped:
-            # Prompt is exactly ">" or starts with "> "
-            if stripped == PROMPT_CHAR or stripped.startswith(f"{PROMPT_CHAR} "):
-                return False  # Prompt visible → dialog dismissed
-            break  # Found non-empty, non-prompt line → ambiguous
+        if not stripped:
+            continue
 
-    # Fallback: ambiguous → assume dialog active
+        if _is_separator_line(stripped):
+            found_separator = True
+            continue
+
+        if found_separator:
+            # First content line above a separator
+            if stripped == PROMPT_CHAR or stripped.startswith(f"{PROMPT_CHAR} "):
+                return False  # Input prompt visible → dialog dismissed
+            break  # Not the prompt → dialog or other content
+
+        # Below first separator → status bar metadata → skip
+
+    # Prompt not found above separator → assume dialog active (conservative)
     return True
 
 

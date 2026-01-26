@@ -200,33 +200,33 @@ def test_dialog_detection() -> list[TestResult]:
 
     results = []
 
-    # Selection cursor present → active
-    content = "  Some option\n❯ Selected option\n  Another option"
+    # Prompt ❯ above separator → dismissed
+    content = "Some output\n───\n❯ \n───\n  Ctx: 24%"
     results.append(
         TestResult(
-            "dialog_cursor_present",
+            "dialog_prompt_above_separator",
+            has_active_dialog(content) is False,
+            "Prompt ❯ above status separator means dismissed",
+        )
+    )
+
+    # Prompt ❯ with user text above separator → dismissed
+    content = "Some output\n───\n❯ hello world\n───\n  Ctx: 24%"
+    results.append(
+        TestResult(
+            "dialog_prompt_with_text",
+            has_active_dialog(content) is False,
+            "Prompt ❯ with text above separator means dismissed",
+        )
+    )
+
+    # Dialog option (not ❯) above separator → active
+    content = "? Pick one\n❯ Option A\n  Option B\n───\n  Ctx: 24%"
+    results.append(
+        TestResult(
+            "dialog_option_above_separator",
             has_active_dialog(content) is True,
-            "Selection cursor ❯ means dialog is active",
-        )
-    )
-
-    # Prompt "> " at last line → dismissed
-    content = "Some output\nMore output\n> "
-    results.append(
-        TestResult(
-            "dialog_prompt_with_space",
-            has_active_dialog(content) is False,
-            "Prompt '> ' at last line means dialog dismissed",
-        )
-    )
-
-    # Prompt ">" alone at last line → dismissed
-    content = "Some output\n>"
-    results.append(
-        TestResult(
-            "dialog_prompt_bare",
-            has_active_dialog(content) is False,
-            "Bare '>' at last line means dialog dismissed",
+            "Non-prompt line above separator means dialog active",
         )
     )
 
@@ -248,23 +248,23 @@ def test_dialog_detection() -> list[TestResult]:
         )
     )
 
-    # ">" mid-text, not at last non-empty line → active (ambiguous)
-    content = "> old prompt\nSome dialog text"
+    # No separator at all → conservative (active)
+    content = "Some text\n❯ Option\n  Another"
     results.append(
         TestResult(
-            "dialog_prompt_not_last",
+            "dialog_no_separator",
             has_active_dialog(content) is True,
-            "Prompt not at last line means ambiguous (assume active)",
+            "No separator means conservative (assume active)",
         )
     )
 
-    # Both ❯ and > present → ❯ takes priority → active
-    content = "❯ Option\n> "
+    # No ❯ anywhere, no separator → conservative (active)
+    content = "Some output\nMore output"
     results.append(
         TestResult(
-            "dialog_cursor_and_prompt",
+            "dialog_no_prompt_no_separator",
             has_active_dialog(content) is True,
-            "Selection cursor takes priority over prompt",
+            "No prompt or separator is conservative (assume active)",
         )
     )
 
