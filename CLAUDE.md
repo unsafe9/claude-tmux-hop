@@ -12,8 +12,8 @@ A tool for navigating between multiple Claude Code sessions in tmux panes with p
 - I'll create a github release with `version-bump` command
   - It will bump the pyproject version
   - PyPI publish will be automatically triggered by github workflow
-- Update the version of `@claude-plugin/.claude-plugin/plugin.json` file when the plugin has changed
-- Update the version of `@.claude-plugin/marketplace.json` file when the marketplace config has changed
+- Update the version of `.claude-plugin/plugin.json` file when the plugin has changed
+- Update the version of `.claude-plugin/marketplace.json` file when the marketplace config has changed
 
 ## Project Structure
 
@@ -22,7 +22,11 @@ src/claude_tmux_hop/
   cli.py          # CLI entry (argparse subcommands)
   parser.py       # CLI argument parser setup (argparse subcommands)
   tmux.py         # Tmux operations, PaneInfo dataclass
-  priority.py     # State priority logic
+  priority.py     # State priority logic - see STATE_PRIORITY
+  paths.py        # XDG/TPM path detection - see get_tmux_config_paths()
+  doctor.py       # Environment checks - see run_all_checks()
+  install.py      # Installation & update logic
+  testing.py      # Self-tests - see run_all_tests()
   log.py          # Logging to ~/.local/state/claude-tmux-hop/hop.log
   notify/         # Notification & focus module (Strategy pattern)
     __init__.py   # Public API, registries, terminal detection
@@ -32,38 +36,57 @@ src/claude_tmux_hop/
     windows.py    # Windows: PowerShell toast, COM focus, Win32 detection
     terminals.py  # Terminal app detection mappings (bundle IDs, env vars)
 hooks/
-  hooks.json          # Hook definitions (7 hooks)
+  hooks.json      # Hook definitions (7 hooks)
 hop.tmux          # TPM plugin entry point
 ```
 
 ## CLI Commands
 
+See `cli.py:main()` for full command definitions.
+
 ```bash
 uvx claude-tmux-hop <command>
+  # Core commands
   register --state <s>    # Set state: waiting|idle|active
   clear                   # Remove hop state from pane
   cycle                   # Jump to next pane (priority order)
-  picker                  # Interactive menu
+  back                    # Jump back to previous pane
+  picker-data             # Output picker data for fzf
+  switch <pane_id>        # Switch to specific pane (internal)
   list                    # Show all panes (auto-validates)
   discover                # Auto-discover Claude sessions
-  prune                   # Remove stale panes no longer running Claude
+  prune                   # Remove stale panes
+  status                  # Output status bar string
+
+  # Management commands
+  install                 # Install tmux/claude plugins
+  update                  # Update installed plugins
+  doctor                  # Check environment
 ```
 
 ## Key Patterns
 
-### State Priority (priority.py)
+### State Priority
+See `priority.py:STATE_PRIORITY`
 - `waiting` (0): user input needed - oldest first
 - `idle` (1): task complete - newest first
 - `active` (2): running - newest first
 
 ### Tmux State Storage
-Uses custom pane options: `@hop-state`, `@hop-timestamp`
+See `tmux.py:set_pane_state()`, `get_hop_panes()`
+- Uses custom pane options: `@hop-state`, `@hop-timestamp`
 
-### Auto-Hop (cli.py)
-Optional feature to auto-switch to panes on state change:
+### Path Detection
+See `paths.py:get_tmux_config_paths()`, `get_tpm_plugin_paths()`
+- XDG: `$XDG_CONFIG_HOME/tmux/tmux.conf`
+- Traditional: `~/.tmux.conf`
+- oh-my-tmux: `~/.tmux.conf.local`
+- TPM: Detects via `TMUX_PLUGIN_MANAGER_PATH` env or standard locations
+
+### Auto-Hop
+See `cli.py:should_auto_hop()`, `do_auto_hop()`
 - `@hop-auto`: comma-separated states to trigger (default: empty = disabled)
 - `@hop-auto-priority-only`: only hop if highest priority (default: "on")
-- Implemented in `should_auto_hop()` and `do_auto_hop()`, called from `cmd_register()`
 
 ### Notification & Focus (notify/)
 Cross-platform notification and terminal focus using Strategy pattern:
@@ -99,12 +122,12 @@ Cross-platform notification and terminal focus using Strategy pattern:
 - Stop → idle
 - SessionEnd → clear
 
-### Code Conventions
-- Functions: `cmd_<command>()` for CLI handlers
-- Uses dataclasses with type hints
-- Early return when not in tmux (`is_in_tmux()`)
-- Subprocess calls for tmux commands with error handling
+## Code Conventions
 
-## Tool Use
 - Use `uv run` instead of `python`
+- Uses dataclasses with type hints
+- Don't import under functions unless it's necessary
+- Extract magic numbers and constants out of scopes
+- Well-structured and clean codes are already descriptive without verbose comments
+- When implementing sharable codes, check duplication and consider modularizing
 

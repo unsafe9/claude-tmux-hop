@@ -40,6 +40,7 @@ def parse_state_set(value: str) -> set[str]:
     return {s.strip().lower() for s in value.split(",") if s.strip()}
 
 
+
 def run_tmux(*args: str, check: bool = True) -> str:
     """Run a tmux command and return stdout.
 
@@ -234,38 +235,6 @@ def _is_interactive_claude_on_tty(tty: str) -> bool:
         return False
 
 
-def get_running_claude_pane_ids() -> set[str]:
-    """Get the set of pane IDs currently running interactive Claude Code.
-
-    Uses ps to check processes on each pane's tty for the 'claude' command.
-    Excludes panes running Claude with -p/--print (non-interactive mode).
-
-    Returns:
-        Set of pane IDs (e.g., {"%0", "%5"}) running Claude Code.
-    """
-    output = run_tmux(
-        "list-panes",
-        "-a",
-        "-F",
-        "#{pane_id}\t#{pane_tty}",
-    )
-
-    pane_ids = set()
-    for line in output.split("\n"):
-        if not line:
-            continue
-
-        parts = line.split("\t")
-        if len(parts) < 2:
-            continue
-
-        pane_id, tty = parts
-        if tty and _is_interactive_claude_on_tty(tty):
-            pane_ids.add(pane_id)
-
-    return pane_ids
-
-
 def get_claude_panes_by_process() -> list[dict]:
     """Find all panes running interactive Claude Code by checking processes.
 
@@ -302,6 +271,15 @@ def get_claude_panes_by_process() -> list[dict]:
             })
 
     return panes
+
+
+def get_running_claude_pane_ids() -> set[str]:
+    """Get the set of pane IDs currently running interactive Claude Code.
+
+    Returns:
+        Set of pane IDs (e.g., {"%0", "%5"}) running Claude Code.
+    """
+    return {p["id"] for p in get_claude_panes_by_process()}
 
 
 def get_hop_panes(validate: bool = True) -> list[PaneInfo]:

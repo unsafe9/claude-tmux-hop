@@ -27,6 +27,9 @@ def create_parser(
     cmd_discover: CommandHandler,
     cmd_prune: CommandHandler,
     cmd_status: CommandHandler,
+    cmd_install: CommandHandler,
+    cmd_update: CommandHandler,
+    cmd_doctor: CommandHandler,
 ) -> argparse.ArgumentParser:
     """Create and configure the argument parser.
 
@@ -172,5 +175,61 @@ def create_parser(
         help="Output status for tmux status bar",
     )
     status_parser.set_defaults(func=cmd_status)
+
+    # --- Management commands ---
+
+    # install command
+    install_parser = subparsers.add_parser(
+        "install",
+        help="Install tmux and Claude Code plugins",
+    )
+    install_parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Accept all prompts (non-interactive)",
+    )
+    install_parser.add_argument(
+        "--component",
+        choices=["all", "tmux", "claude"],
+        default="all",
+        help="Component to install (default: all)",
+    )
+    install_parser.add_argument(
+        "--skip-tmux",
+        action="store_true",
+        help="Skip tmux plugin installation",
+    )
+    install_parser.add_argument(
+        "--skip-claude",
+        action="store_true",
+        help="Skip Claude Code plugin installation",
+    )
+    install_parser.set_defaults(func=cmd_install)
+
+    # update command
+    update_parser = subparsers.add_parser(
+        "update",
+        help="Update installed plugins to latest version",
+    )
+    update_parser.add_argument(
+        "--component",
+        choices=["all", "tmux", "claude"],
+        default="all",
+        help="Component to update (default: all)",
+    )
+    update_parser.set_defaults(func=cmd_update)
+
+    # doctor command
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Check environment and dependencies",
+    )
+    doctor_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON",
+    )
+    doctor_parser.set_defaults(func=cmd_doctor)
 
     return parser
