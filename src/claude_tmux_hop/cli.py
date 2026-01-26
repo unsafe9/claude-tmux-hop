@@ -29,6 +29,7 @@ from .tmux import (
     run_tmux,
     set_pane_state,
     switch_to_pane,
+    validate_waiting_panes,
 )
 
 from functools import wraps
@@ -140,6 +141,7 @@ def should_auto_hop(new_state: str) -> bool:
 
         # Get all panes and check if any other has equal or higher priority
         panes = get_hop_panes(validate=True)
+        validate_waiting_panes(panes)
         new_priority = STATE_PRIORITY.get(new_state, 2)
 
         for pane in panes:
@@ -243,6 +245,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         log_info(f"cycle: auto-pruned {pane.id}")
 
     panes = get_hop_panes(validate=False)  # Already pruned above
+    validate_waiting_panes(panes)
     if not panes:
         log_info("cycle: no panes found")
         run_tmux("display-message", "No Claude Code sessions found")
@@ -308,6 +311,7 @@ def cmd_picker_data(args: argparse.Namespace) -> int:
         return 1
 
     panes = get_hop_panes()
+    validate_waiting_panes(panes)
     if not panes:
         return 0
 
@@ -339,6 +343,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     """List all Claude Code panes with their state."""
     log_cli_call("list")
     panes = get_hop_panes()
+    validate_waiting_panes(panes)
     if not panes:
         log_info("list: no panes found")
         print("No Claude Code sessions found")
@@ -443,6 +448,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     # Get panes without validation for speed
     panes = get_hop_panes(validate=False)
+    validate_waiting_panes(panes)
 
     # Group by state
     groups = group_by_state(panes)

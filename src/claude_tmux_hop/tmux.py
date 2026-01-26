@@ -7,7 +7,12 @@ import subprocess
 import time
 from dataclasses import dataclass
 
-from .log import log_debug, log_error
+from .log import log_debug, log_error, log_info
+
+# Dialog detection constants
+DIALOG_CURSOR = "❯"  # Ink selection cursor (U+276F)
+PROMPT_CHAR = ">"  # Claude Code input prompt (U+003E)
+WAITING_STALE_THRESHOLD = 3  # Seconds before checking a "waiting" pane
 
 
 
@@ -421,3 +426,88 @@ def switch_to_pane(
     run_tmux("select-pane", "-t", pane_id)
 
     return True
+
+
+def capture_pane_content(pane_id: str, last_lines: int = 15) -> str:
+    """Capture the last N lines of a tmux pane's visible content.
+
+    Args:
+        pane_id: The pane ID to capture
+        last_lines: Number of lines from the bottom to capture
+
+    Returns:
+        The captured content, or empty string on failure
+    """
+    try:
+        return run_tmux(
+            "capture-pane", "-t", pane_id, "-p", "-S", f"-{last_lines}",
+            check=False,
+        )
+    except RuntimeError:
+        return ""
+
+
+def has_active_dialog(content: str) -> bool:
+    """Check if a Claude Code interactive dialog is active in pane content.
+
+    Phase 1: If the selection cursor (❯) is present, a dialog is active.
+    Phase 2: If absent, check if the last non-empty line is the Claude Code
+              prompt (> or > ...). If so, the dialog was dismissed.
+    Fallback: Neither found → ambiguous → assume dialog is still active.
+
+    Args:
+        content: Captured pane content (last N lines)
+
+    Returns:
+        True if a dialog appears to be active, False if dismissed
+    """
+    if not content or not content.strip():
+        return True  # Conservative: empty/whitespace = assume active
+
+    # Phase 1: Selection cursor present → dialog active
+    if DIALOG_CURSOR in content:
+        return True
+
+    # Phase 2: Check last non-empty line for prompt
+    lines = content.splitlines()
+    for line in reversed(lines):
+        stripped = line.strip()
+        if stripped:
+            # Prompt is exactly ">" or starts with "> "
+            if stripped == PROMPT_CHAR or stripped.startswith(f"{PROMPT_CHAR} "):
+                return False  # Prompt visible → dialog dismissed
+            break  # Found non-empty, non-prompt line → ambiguous
+
+    # Fallback: ambiguous → assume dialog active
+    return True
+
+
+def validate_waiting_panes(panes: list[PaneInfo]) -> None:
+    """Check stale "waiting" panes and flip to "idle" if dialog is dismissed.
+
+    Mutates panes in-place when a stale waiting pane's dialog is no longer active.
+
+    Args:
+        panes: List of PaneInfo objects (modified in-place)
+    """
+    now = int(time.time())
+
+    for pane in panes:
+        if pane.state != "waiting":
+            continue
+
+        if (now - pane.timestamp) < WAITING_STALE_THRESHOLD:
+            continue
+
+        content = capture_pane_content(pane.id)
+        if not content:
+            continue  # Pane gone or empty, skip
+
+        if not has_active_dialog(content):
+            try:
+                set_pane_state("idle", pane.id)
+                pane.state = "idle"
+                pane.timestamp = now
+                log_info(f"validate: {pane.id} flipped waiting → idle (dialog dismissed)")
+            except RuntimeError:
+                pass  # Pane may have disappeared

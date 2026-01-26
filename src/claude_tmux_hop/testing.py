@@ -194,11 +194,89 @@ def validate_hooks_json() -> list[TestResult]:
     return results
 
 
+def test_dialog_detection() -> list[TestResult]:
+    """Test dialog detection logic (unit test, no tmux required)."""
+    from .tmux import has_active_dialog
+
+    results = []
+
+    # Selection cursor present → active
+    content = "  Some option\n❯ Selected option\n  Another option"
+    results.append(
+        TestResult(
+            "dialog_cursor_present",
+            has_active_dialog(content) is True,
+            "Selection cursor ❯ means dialog is active",
+        )
+    )
+
+    # Prompt "> " at last line → dismissed
+    content = "Some output\nMore output\n> "
+    results.append(
+        TestResult(
+            "dialog_prompt_with_space",
+            has_active_dialog(content) is False,
+            "Prompt '> ' at last line means dialog dismissed",
+        )
+    )
+
+    # Prompt ">" alone at last line → dismissed
+    content = "Some output\n>"
+    results.append(
+        TestResult(
+            "dialog_prompt_bare",
+            has_active_dialog(content) is False,
+            "Bare '>' at last line means dialog dismissed",
+        )
+    )
+
+    # Empty content → conservative (active)
+    results.append(
+        TestResult(
+            "dialog_empty_content",
+            has_active_dialog("") is True,
+            "Empty content is conservative (assume active)",
+        )
+    )
+
+    # Whitespace-only content → conservative (active)
+    results.append(
+        TestResult(
+            "dialog_whitespace_only",
+            has_active_dialog("   \n  \n  ") is True,
+            "Whitespace-only is conservative (assume active)",
+        )
+    )
+
+    # ">" mid-text, not at last non-empty line → active (ambiguous)
+    content = "> old prompt\nSome dialog text"
+    results.append(
+        TestResult(
+            "dialog_prompt_not_last",
+            has_active_dialog(content) is True,
+            "Prompt not at last line means ambiguous (assume active)",
+        )
+    )
+
+    # Both ❯ and > present → ❯ takes priority → active
+    content = "❯ Option\n> "
+    results.append(
+        TestResult(
+            "dialog_cursor_and_prompt",
+            has_active_dialog(content) is True,
+            "Selection cursor takes priority over prompt",
+        )
+    )
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
     all_results.extend(test_state_transitions())
     all_results.extend(test_priority_sorting())
+    all_results.extend(test_dialog_detection())
     all_results.extend(validate_hooks_json())
 
     passed = sum(1 for r in all_results if r.passed)
