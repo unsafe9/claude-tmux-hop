@@ -45,6 +45,9 @@ def requires_tmux(silent: bool = False) -> Callable:
         @wraps(func)
         def wrapper(args: argparse.Namespace) -> int:
             if not is_in_tmux():
+                cmd_name = func.__name__.removeprefix("cmd_")
+                params = {k: v for k, v in vars(args).items() if k not in ("func", "command")}
+                log_cli_call(cmd_name, params or None)
                 if silent:
                     log_info(f"{func.__name__}: not in tmux, skipping")
                     return 0
@@ -623,6 +626,9 @@ def main() -> int:
         cmd_discover=cmd_discover,
         cmd_prune=cmd_prune,
         cmd_status=cmd_status,
+        cmd_install=cmd_install,
+        cmd_update=cmd_update,
+        cmd_doctor=cmd_doctor,
     )
     args = parser.parse_args()
     return args.func(args)

@@ -11,6 +11,12 @@ from dataclasses import dataclass
 
 from .paths import find_plugin_path, find_tpm_path, plugin_in_config
 
+# Environment check constants
+COMMAND_TIMEOUT = 5
+COMMAND_TIMEOUT_LONG = 10
+MIN_PYTHON_VERSION = (3, 10)
+MAX_VERSION_DISPLAY_LENGTH = 50
+
 
 @dataclass
 class CheckResult:
@@ -30,7 +36,7 @@ def check_tmux() -> CheckResult:
             ["tmux", "-V"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=COMMAND_TIMEOUT,
         )
         if result.returncode != 0:
             return CheckResult("tmux", False, message="Command failed")
@@ -58,7 +64,7 @@ def check_tmux() -> CheckResult:
 def check_python() -> CheckResult:
     """Check Python version."""
     version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    if sys.version_info < (3, 10):
+    if sys.version_info < MIN_PYTHON_VERSION:
         return CheckResult("python", False, version, "Requires 3.10+")
     return CheckResult("python", True, version)
 
@@ -70,13 +76,13 @@ def check_claude_cli() -> CheckResult:
             ["claude", "--version"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=COMMAND_TIMEOUT,
         )
         if result.returncode == 0:
             version = result.stdout.strip()
             # Truncate long version strings
-            if len(version) > 50:
-                version = version[:47] + "..."
+            if len(version) > MAX_VERSION_DISPLAY_LENGTH:
+                version = version[:MAX_VERSION_DISPLAY_LENGTH - 3] + "..."
             return CheckResult("claude", True, version)
         return CheckResult("claude", False, message="Command failed")
     except FileNotFoundError:
@@ -113,7 +119,7 @@ def check_claude_plugin() -> CheckResult:
             ["claude", "plugin", "list"],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=COMMAND_TIMEOUT_LONG,
         )
         if "claude-tmux-hop" in result.stdout:
             return CheckResult("claude-plugin", True, message="Installed", required=False)

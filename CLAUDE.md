@@ -62,7 +62,6 @@ uvx claude-tmux-hop <command>
   install                 # Install tmux/claude plugins
   update                  # Update installed plugins
   doctor                  # Check environment
-  test [suite]            # Run self-tests
 ```
 
 ## Key Patterns

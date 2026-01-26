@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -16,17 +17,21 @@ from .paths import (
 )
 
 
+DEFAULT_COMMAND_TIMEOUT = 30
+PLUGIN_LIST_TIMEOUT = 10
+
+
+@dataclass
 class CommandResult:
     """Result of running a command."""
 
-    def __init__(self, success: bool, stdout: str = "", stderr: str = "", error: str = ""):
-        self.success = success
-        self.stdout = stdout
-        self.stderr = stderr
-        self.error = error  # High-level error description
+    success: bool
+    stdout: str = ""
+    stderr: str = ""
+    error: str = ""
 
 
-def _run_command(cmd: list[str], timeout: int = 30) -> CommandResult:
+def _run_command(cmd: list[str], timeout: int = DEFAULT_COMMAND_TIMEOUT) -> CommandResult:
     """Run a command with standard error handling.
 
     Args:
@@ -212,7 +217,7 @@ def verify_installation() -> dict[str, bool]:
         results["tmux_plugin"] = True
 
     # Check Claude plugin
-    result = _run_command(["claude", "plugin", "list"], timeout=10)
+    result = _run_command(["claude", "plugin", "list"], timeout=PLUGIN_LIST_TIMEOUT)
     if result.success and "claude-tmux-hop" in result.stdout:
         results["claude_plugin"] = True
 
