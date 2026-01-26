@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 
@@ -201,7 +202,10 @@ class MacOSNotifier:
             True if notification was sent successfully, False otherwise
         """
         # Build tmux switch command for click action
-        click_cmd = f"tmux switch-client -t '{ctx.session}:{ctx.window}' && tmux select-pane -t '{ctx.pane_id}'"
+        click_cmd = (
+            f"tmux switch-client -t {shlex.quote(f'{ctx.session}:{ctx.window}')} && "
+            f"tmux select-pane -t {shlex.quote(ctx.pane_id)}"
+        )
 
         args = [
             "terminal-notifier",

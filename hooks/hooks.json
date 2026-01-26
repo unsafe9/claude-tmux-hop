@@ -34,6 +34,7 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "AskUserQuestion|ExitPlanMode",
         "hooks": [
           {
             "type": "command",

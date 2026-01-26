@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import subprocess
 
 from .base import SUBPROCESS_TIMEOUT_LONG, PaneContext, switch_tmux_pane
@@ -28,8 +29,8 @@ class WindowsNotifier:
             which is beyond the scope of this tool. The on_click parameter is
             accepted for API compatibility but ignored.
         """
-        title_escaped = title.replace("'", "''")
-        message_escaped = message.replace("'", "''")
+        title_escaped = html.escape(title)
+        message_escaped = html.escape(message)
 
         # Build simple toast XML (click-to-focus not supported on Windows)
         toast_xml = f'''

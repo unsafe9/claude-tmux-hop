@@ -98,7 +98,7 @@ def get_current_session_window() -> tuple[str, int | None]:
         Tuple of (session_name, window_index). Window may be None if parsing fails.
     """
     current_info = run_tmux("display-message", "-p", "#{session_name}\t#{window_index}")
-    parts = current_info.split("\t")
+    parts = current_info.split("\t", maxsplit=1)
     session = parts[0] if parts else ""
     window = int(parts[1]) if len(parts) > 1 and parts[1] else None
     return session, window
@@ -261,7 +261,7 @@ def get_claude_panes_by_process() -> list[dict]:
         if not line:
             continue
 
-        parts = line.split("\t")
+        parts = line.split("\t", maxsplit=4)
         if len(parts) < 5:
             continue
 
@@ -314,7 +314,7 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
         if not line:
             continue
 
-        parts = line.split("\t")
+        parts = line.split("\t", maxsplit=5)
         if len(parts) < 6:
             continue
 
@@ -395,7 +395,7 @@ def switch_to_pane(
         for line in output.split("\n"):
             if not line:
                 continue
-            parts = line.split("\t")
+            parts = line.split("\t", maxsplit=2)
             if len(parts) >= 3 and parts[0] == pane_id:
                 target_session = parts[1]
                 target_window = int(parts[2]) if parts[2] else None

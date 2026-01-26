@@ -282,6 +282,9 @@ def handle_state_notifications(state: str, project: str, pane_context: PaneConte
     if not wants_focus and not wants_notify:
         return
 
+    # Check focus state BEFORE focus_terminal() changes it
+    already_focused = is_terminal_focused() if wants_notify else False
+
     # Terminal focus (if enabled) - full navigation
     if wants_focus:
         if focus_terminal(pane_context):
@@ -291,8 +294,8 @@ def handle_state_notifications(state: str, project: str, pane_context: PaneConte
 
     # System notification (if enabled)
     if wants_notify:
-        # Smart suppression: skip if already focused on terminal
-        if is_terminal_focused():
+        # Smart suppression: skip if terminal was already focused before we acted
+        if already_focused:
             log_info(f"notification suppressed: terminal already focused")
             return
 

@@ -149,7 +149,8 @@ def should_auto_hop(new_state: str) -> bool:
                 continue  # Skip current pane
             pane_priority = STATE_PRIORITY.get(pane.state, 2)
             if pane_priority < new_priority:
-                # Another pane has strictly higher priority - don't auto-hop
+                # Strict < intentional: <= would deadlock equal-priority panes
+                # (e.g. two "waiting" panes block each other from auto-hopping)
                 log_info(f"auto-hop: skipped, {pane.id} has higher priority {pane.state}")
                 return False
 
