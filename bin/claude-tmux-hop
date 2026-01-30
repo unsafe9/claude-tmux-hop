@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Wrapper that uses @hop-dev-path if set, otherwise uvx
+# CLI wrapper for claude-tmux-hop
+# Uses the local project directory derived from script location
 
-dev_path=$(tmux show-option -gqv @hop-dev-path 2>/dev/null)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-if [[ -n "$dev_path" ]]; then
-    exec uv run --project "$dev_path" claude-tmux-hop "$@"
-else
-    exec uvx claude-tmux-hop "$@"
-fi
+export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"
+exec python3 -m claude_tmux_hop "$@"

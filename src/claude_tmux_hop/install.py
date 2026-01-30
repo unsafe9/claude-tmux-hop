@@ -263,9 +263,9 @@ def update_tmux_plugin(quiet: bool = False) -> bool:
                 print(f"  Error: {result.stderr}")
             return False
     elif plugin_dir.is_symlink():
-        # Symlink installation - uvx handles updates
+        # Symlink installation - update via git in source directory
         if not quiet:
-            print("  Symlink installation - update via: uvx claude-tmux-hop@latest")
+            print("  Symlink installation - update via git pull in source directory")
         return True
     else:
         if not quiet:
@@ -300,7 +300,7 @@ def update_claude_plugin(quiet: bool = False) -> bool:
         # Check if not installed
         if "not installed" in result.stderr.lower() or "not found" in result.stderr.lower():
             if not quiet:
-                print("  Plugin not installed. Run: uvx claude-tmux-hop install")
+                print("  Plugin not installed. Install via: claude plugin install claude-tmux-hop")
             return False
         if not quiet:
             print(f"  Error: {result.stderr}")

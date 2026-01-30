@@ -14,15 +14,9 @@ get_tmux_option() {
     echo "${value:-$default}"
 }
 
-# Get the hop command path (respects @hop-dev-path)
+# Get the hop command path (uses local bin wrapper)
 get_hop_cmd() {
-    local dev_path
-    dev_path=$(get_tmux_option @hop-dev-path "")
-    if [[ -n "$dev_path" ]]; then
-        echo "uv run --project '$dev_path' claude-tmux-hop"
-    else
-        echo "$CURRENT_DIR/bin/claude-tmux-hop"
-    fi
+    echo "$CURRENT_DIR/bin/claude-tmux-hop"
 }
 
 # Check tmux version >= 3.2 (for popup support)
@@ -94,7 +88,7 @@ main() {
     back_key=$(get_tmux_option @hop-back-key "C-Space")
     cycle_mode=$(get_tmux_option @hop-cycle-mode "priority")
 
-    # Wrapper script respects @hop-dev-path for local development, otherwise uses uvx
+    # Wrapper script uses local project via PYTHONPATH
     local cmd="$CURRENT_DIR/bin/claude-tmux-hop"
 
     # Build cycle command with mode flag
@@ -116,6 +110,18 @@ main() {
     # Set up status format for use in status-left/status-right
     # Users can use #{E:@hop-status} in their tmux config
     tmux set-option -g @hop-status "#($cmd status)"
+
+    # Version check: compare tmux plugin with Claude Code plugin
+    local tmux_version claude_plugin_path claude_version
+    tmux_version=$(grep -m1 '^version = ' "$CURRENT_DIR/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
+    claude_plugin_path="$HOME/.claude/plugins/claude-tmux-hop"
+
+    if [[ -n "$tmux_version" && -x "$claude_plugin_path/bin/claude-tmux-hop" ]]; then
+        claude_version=$("$claude_plugin_path/bin/claude-tmux-hop" --version 2>/dev/null | awk '{print $2}')
+        if [[ -n "$claude_version" && "$tmux_version" != "$claude_version" ]]; then
+            tmux display-message "claude-tmux-hop: version mismatch (tmux: $tmux_version, claude: $claude_version)"
+        fi
+    fi
 }
 
 main

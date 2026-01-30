@@ -571,7 +571,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         if installed["tmux_plugin"]:
             success = update_tmux_plugin() and success
         else:
-            print("  Not installed. Run: uvx claude-tmux-hop install")
+            print("  Not installed. See README for installation instructions.")
         print()
 
     # Update Claude Code plugin
@@ -580,7 +580,7 @@ def cmd_update(args: argparse.Namespace) -> int:
         if installed["claude_plugin"]:
             success = update_claude_plugin() and success
         else:
-            print("  Not installed. Run: uvx claude-tmux-hop install")
+            print("  Not installed. See README for installation instructions.")
         print()
 
     if success:
