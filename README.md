@@ -18,7 +18,6 @@ Quickly hop between Claude Code sessions running in tmux panes.
 
 ## Requirements
 
-- [uv](https://docs.astral.sh/uv/) (for `uvx` command)
 - tmux 3.0+
 - Python 3.10+
 - Claude Code
@@ -41,8 +40,6 @@ set -g @plugin 'unsafe9/claude-tmux-hop'
 ```
 
 Then press `prefix + I` to install.
-
-That's it! The CLI runs via `uvx` automatically - no manual Python installation needed.
 
 Any existing Claude Code sessions will be automatically discovered and registered as `idle` on plugin load.
 
@@ -111,28 +108,12 @@ set -g @hop-status-format '{waiting:󰂜} {idle:󰄬} {active:󰑮}'  # Include 
 
 ### CLI Commands
 
+The CLI is bundled within each plugin and invoked automatically by tmux keybindings and Claude Code hooks. For debugging, invoke from the plugin directory:
+
 ```bash
-# List all Claude Code panes
-uvx claude-tmux-hop list
-
-# Cycle to next pane (usually via keybinding)
-uvx claude-tmux-hop cycle
-
-# Jump back to previous pane (cross-session/window)
-uvx claude-tmux-hop back
-
-# Show picker menu (fzf popup if available, else display-menu)
-uvx claude-tmux-hop picker
-uvx claude-tmux-hop picker --menu  # Force display-menu style
-
-# Discover existing Claude Code sessions (runs automatically on plugin load)
-uvx claude-tmux-hop discover
-
-# Remove stale state from panes no longer running Claude Code
-uvx claude-tmux-hop prune
-
-# Output status for tmux status bar
-uvx claude-tmux-hop status
+# From tmux plugin directory (e.g., ~/.tmux/plugins/claude-tmux-hop)
+./bin/claude-tmux-hop list      # List all Claude Code panes
+./bin/claude-tmux-hop doctor    # Check environment
 ```
 
 ## How It Works

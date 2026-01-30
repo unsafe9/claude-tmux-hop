@@ -5,13 +5,11 @@ A tool for navigating between multiple Claude Code sessions in tmux panes with p
 ## Tech Stack
 
 - Python 3.10+ (standard library only, no external deps)
-- `uv`
 
 ## Deployment
 
 - I'll create a github release with `version-bump` command
   - It will bump the pyproject version
-  - PyPI publish will be automatically triggered by github workflow
 - Update the version of `.claude-plugin/plugin.json` file when the plugin has changed
 - Update the version of `.claude-plugin/marketplace.json` file when the marketplace config has changed
 
@@ -45,7 +43,7 @@ hop.tmux          # TPM plugin entry point
 See `cli.py:main()` for full command definitions.
 
 ```bash
-uvx claude-tmux-hop <command>
+claude-tmux-hop <command>
   # Core commands
   register --state <s>    # Set state: waiting|idle|active
   clear                   # Remove hop state from pane
@@ -124,7 +122,6 @@ Cross-platform notification and terminal focus using Strategy pattern:
 
 ## Code Conventions
 
-- Use `uv run` instead of `python`
 - Uses dataclasses with type hints
 - Don't import under functions unless it's necessary
 - Extract magic numbers and constants out of scopes
