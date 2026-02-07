@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
 from pathlib import Path
 
@@ -29,8 +30,10 @@ def get_logger() -> logging.Logger:
 
     # Avoid duplicate handlers if called multiple times
     if not _logger.handlers:
-        # File handler with detailed format
-        handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+        # File handler with rotation (1MB max, 3 backups)
+        handler = logging.handlers.RotatingFileHandler(
+            LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+        )
         handler.setLevel(logging.DEBUG)
 
         # Format: time | pane | project | message
@@ -65,7 +68,10 @@ def get_pane_logger(pane_id: str | None = None) -> PaneLogAdapter:
         pane_id = os.environ.get("TMUX_PANE", "?")
 
     # Get project name from current working directory
-    project = Path.cwd().name
+    try:
+        project = Path.cwd().name
+    except (FileNotFoundError, OSError):
+        project = "unknown"
 
     logger = get_logger()
     return PaneLogAdapter(logger, {"pane": pane_id, "project": project})

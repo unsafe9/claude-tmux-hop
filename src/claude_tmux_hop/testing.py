@@ -132,10 +132,12 @@ def validate_hooks_json() -> list[TestResult]:
 
     package_path = Path(claude_tmux_hop.__file__).parent
 
-    # Try multiple locations
+    # Try multiple locations: source layout, pip package data, cwd
     possible_paths = [
-        package_path.parent.parent / "hooks" / "hooks.json",
-        Path.cwd() / "hooks" / "hooks.json",
+        package_path.parent.parent / "hooks" / "hooks.json",  # source: src/../hooks/
+        package_path / "hooks" / "hooks.json",  # pip: bundled as package data
+        package_path.parent / "hooks" / "hooks.json",  # alternate pip layout
+        Path.cwd() / "hooks" / "hooks.json",  # current directory fallback
     ]
 
     hooks_path = None

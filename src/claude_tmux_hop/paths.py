@@ -27,7 +27,7 @@ def get_tmux_config_paths() -> list[Path]:
     """
     xdg_config = get_xdg_config_home()
 
-    return [
+    paths = [
         Path.home() / ".tmux.conf",
         xdg_config / "tmux" / "tmux.conf",
         Path.home() / ".config" / "tmux" / "tmux.conf",
@@ -35,6 +35,9 @@ def get_tmux_config_paths() -> list[Path]:
         Path.home() / ".tmux.conf.local",
         xdg_config / "tmux" / "tmux.conf.local",
     ]
+
+    # Deduplicate while preserving order (XDG default can duplicate entry 3)
+    return list(dict.fromkeys(paths))
 
 
 def get_active_tmux_config() -> Path | None:

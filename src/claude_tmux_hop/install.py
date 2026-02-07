@@ -114,15 +114,33 @@ def install_tmux_plugin_tpm(tmux_conf_path: Path | None = None) -> bool:
 
     plugin_line = "set -g @plugin 'unsafe9/claude-tmux-hop'"
 
-    if tmux_conf_path.exists():
-        content = tmux_conf_path.read_text()
-        if plugin_line in content or "claude-tmux-hop" in content:
-            print(f"  Plugin already in {tmux_conf_path}")
-            return True
+    try:
+        if tmux_conf_path.exists():
+            content = tmux_conf_path.read_text()
+            if plugin_line in content or "claude-tmux-hop" in content:
+                print(f"  Plugin already in {tmux_conf_path}")
+                return True
+            # Check for oh-my-tmux markers - prefer .tmux.conf.local instead
+            if "oh-my-tmux" in content or "/.tmux/.tmux.conf" in content:
+                tmux_conf_path = Path.home() / ".tmux.conf.local"
+                if tmux_conf_path.exists():
+                    local_content = tmux_conf_path.read_text()
+                    if plugin_line in local_content or "claude-tmux-hop" in local_content:
+                        print(f"  Plugin already in {tmux_conf_path}")
+                        return True
 
-    # Append plugin line
-    with open(tmux_conf_path, "a") as f:
-        f.write(f"\n# Claude Tmux Hop\n{plugin_line}\n")
+        # Ensure parent directory exists
+        tmux_conf_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Append plugin line
+        with open(tmux_conf_path, "a") as f:
+            f.write(f"\n# Claude Tmux Hop\n{plugin_line}\n")
+    except PermissionError:
+        print(f"  Error: Permission denied writing to {tmux_conf_path}")
+        return False
+    except OSError as e:
+        print(f"  Error writing config: {e}")
+        return False
 
     print(f"  Added to {tmux_conf_path}")
     print(f"  Run 'prefix + I' in tmux to install, or reload: tmux source {tmux_conf_path}")
@@ -142,10 +160,24 @@ def install_tmux_plugin_manual(plugin_dir: Path | None = None) -> bool:
     if plugin_dir is None:
         plugin_dir = get_plugin_install_dir()
 
-    # Find the package installation path
+    # Find the project root (where hop.tmux lives)
     import claude_tmux_hop
 
-    package_path = Path(claude_tmux_hop.__file__).parent.parent.parent
+    package_dir = Path(claude_tmux_hop.__file__).parent
+    # Try source layout first: src/claude_tmux_hop/ -> project root is .parent.parent
+    # Then pip layout: site-packages/claude_tmux_hop/ -> project root is .parent
+    package_path = None
+    for levels in (2, 1, 3):
+        candidate = package_dir
+        for _ in range(levels):
+            candidate = candidate.parent
+        if (candidate / "hop.tmux").exists():
+            package_path = candidate
+            break
+
+    if package_path is None:
+        print("  Error: Could not locate project root (hop.tmux not found)")
+        return False
 
     target = plugin_dir / "claude-tmux-hop"
 
