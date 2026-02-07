@@ -602,6 +602,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     results = run_all_checks()
 
+    required_failed = [r for r in results if not r.ok and r.required]
+
     if args.json:
         print(format_results(results, use_json=True))
     else:
@@ -610,14 +612,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print()
 
         # Summary
-        required_failed = [r for r in results if not r.ok and r.required]
         if required_failed:
             print(f"FAIL: {len(required_failed)} required check(s) failed")
-            return 1
         else:
             print("OK: All required checks passed")
 
-    return 0
+    return 1 if required_failed else 0
 
 
 def main() -> int:

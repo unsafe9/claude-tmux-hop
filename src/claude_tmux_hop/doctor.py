@@ -121,7 +121,7 @@ def check_claude_plugin() -> CheckResult:
             text=True,
             timeout=COMMAND_TIMEOUT_LONG,
         )
-        if "claude-tmux-hop" in result.stdout:
+        if result.returncode == 0 and "claude-tmux-hop" in result.stdout:
             return CheckResult("claude-plugin", True, message="Installed", required=False)
         return CheckResult("claude-plugin", False, message="Not installed", required=False)
     except FileNotFoundError:

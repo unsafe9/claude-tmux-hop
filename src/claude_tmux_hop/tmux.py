@@ -100,7 +100,10 @@ def get_current_session_window() -> tuple[str, int | None]:
     current_info = run_tmux("display-message", "-p", "#{session_name}\t#{window_index}")
     parts = current_info.split("\t", maxsplit=1)
     session = parts[0] if parts else ""
-    window = int(parts[1]) if len(parts) > 1 and parts[1] else None
+    try:
+        window = int(parts[1]) if len(parts) > 1 and parts[1] else None
+    except ValueError:
+        window = None
     return session, window
 
 
@@ -150,11 +153,8 @@ def has_hop_state(pane_id: str | None = None) -> bool:
         True if the pane has hop state set
     """
     target = _pane_target_args(pane_id)
-    try:
-        result = run_tmux("show-option", "-p", *target, "-qv", "@hop-state", check=False)
-        return bool(result)
-    except RuntimeError:
-        return False
+    result = run_tmux("show-option", "-p", *target, "-qv", "@hop-state", check=False)
+    return bool(result)
 
 
 def clear_pane_state(pane_id: str | None = None) -> None:
@@ -178,11 +178,8 @@ def get_global_option(name: str, default: str = "") -> str:
     Returns:
         The option value, or default if not set
     """
-    try:
-        result = run_tmux("show-option", "-gqv", name, check=False)
-        return result if result else default
-    except RuntimeError:
-        return default
+    result = run_tmux("show-option", "-gqv", name, check=False)
+    return result if result else default
 
 
 def set_global_option(name: str, value: str) -> None:
@@ -438,13 +435,10 @@ def capture_pane_content(pane_id: str, last_lines: int = 15) -> str:
     Returns:
         The captured content, or empty string on failure
     """
-    try:
-        return run_tmux(
-            "capture-pane", "-t", pane_id, "-p", "-S", f"-{last_lines}",
-            check=False,
-        )
-    except RuntimeError:
-        return ""
+    return run_tmux(
+        "capture-pane", "-t", pane_id, "-p", "-S", f"-{last_lines}",
+        check=False,
+    )
 
 
 def _is_separator_line(stripped: str) -> bool:
