@@ -69,7 +69,7 @@ class LinuxFocusHandler:
         # Fallback to xdotool
         if shutil.which("xdotool"):
             search_term = session_name if session_name else app_name
-            if run_command(["xdotool", "search", "--name", search_term, "windowactivate"]):
+            if run_command(["xdotool", "search", "--limit", "1", "--name", search_term, "windowactivate"]):
                 return True
 
         return False

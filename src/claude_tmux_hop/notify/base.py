@@ -151,13 +151,18 @@ def switch_tmux_pane(ctx: PaneContext) -> None:
     Args:
         ctx: Pane context with session, window, and pane_id
     """
-    subprocess.run(
-        ["tmux", "select-window", "-t", f"{ctx.session}:{ctx.window}"],
-        capture_output=True,
-        check=False,
-    )
-    subprocess.run(
-        ["tmux", "select-pane", "-t", ctx.pane_id],
-        capture_output=True,
-        check=False,
-    )
+    try:
+        subprocess.run(
+            ["tmux", "select-window", "-t", f"{ctx.session}:{ctx.window}"],
+            capture_output=True,
+            timeout=SUBPROCESS_TIMEOUT,
+            check=False,
+        )
+        subprocess.run(
+            ["tmux", "select-pane", "-t", ctx.pane_id],
+            capture_output=True,
+            timeout=SUBPROCESS_TIMEOUT,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        pass

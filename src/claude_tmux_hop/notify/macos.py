@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
@@ -76,8 +77,6 @@ def _has_terminal_notifier() -> bool:
 
 def _get_bundle_id() -> str | None:
     """Get the bundle ID of the current terminal app."""
-    import os
-
     return os.environ.get("__CFBundleIdentifier")
 
 
@@ -142,7 +141,6 @@ tell application "Terminal"
     end repeat
     if targetWindow is not null then
         set index of targetWindow to 1
-        set selected tab of targetWindow to (first tab of targetWindow whose busy is true or selected is true)
     end if
 end tell
 '''
@@ -330,7 +328,7 @@ end tell
 '''
         result = _run_osascript_output(script)
         if result:
-            return app_name.lower() in result.lower()
+            return result.strip().lower() == app_name.lower()
         return False
 
     def _is_iterm_session_focused(self, session_name: str) -> bool:

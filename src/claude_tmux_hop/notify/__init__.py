@@ -123,7 +123,7 @@ def _get_terminal_app() -> str | None:
         comspec = os.environ.get("ComSpec", "").lower()
         if "cmd.exe" in comspec:
             return "cmd"
-        return "Windows Terminal"
+        return None
 
     # Check TERM_PROGRAM (useful on Linux or when bundle ID not available)
     term_program = os.environ.get("TERM_PROGRAM", "")
