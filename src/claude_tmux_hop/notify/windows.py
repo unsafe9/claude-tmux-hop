@@ -63,7 +63,7 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
                 timeout=SUBPROCESS_TIMEOUT_LONG,
                 check=False,
             )
-            return True
+            return result.returncode == 0
         except (subprocess.SubprocessError, OSError):
             return False
 
@@ -101,7 +101,7 @@ class WindowsFocusHandler:
 
     def _focus_window(self, app_name: str) -> bool:
         """Bring application window to foreground using COM automation."""
-        app_escaped = app_name.replace("'", "''")
+        app_escaped = app_name.replace("'", "''").replace("`", "``")
 
         ps_script = f"""
 $wshell = New-Object -ComObject WScript.Shell
