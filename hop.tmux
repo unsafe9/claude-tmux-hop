@@ -105,7 +105,7 @@ main() {
     tmux bind-key -n "$back_key" run-shell "$cmd back"
 
     # Auto-discover existing Claude Code sessions (skips already registered panes)
-    $cmd discover --quiet &
+    $cmd discover --quiet 2>/dev/null || true &
 
     # Set up status format for use in status-left/status-right
     # Users can use #{E:@hop-status} in their tmux config
@@ -113,7 +113,7 @@ main() {
 
     # Version check: compare tmux plugin with Claude Code plugin
     local tmux_version claude_plugin_path claude_version
-    tmux_version=$(grep -m1 '^version = ' "$CURRENT_DIR/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
+    tmux_version=$(python3 -c "import tomllib; print(tomllib.load(open('$CURRENT_DIR/pyproject.toml','rb'))['project']['version'])" 2>/dev/null || grep -m1 '^version = ' "$CURRENT_DIR/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')
     claude_plugin_path="$HOME/.claude/plugins/claude-tmux-hop"
 
     if [[ -n "$tmux_version" && -x "$claude_plugin_path/bin/claude-tmux-hop" ]]; then
