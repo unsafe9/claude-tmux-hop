@@ -43,7 +43,6 @@
         ]
       }
     ],
-    "_comment:Notification": "No recovery hook exists for Notification events. After permission_prompt/elicitation_dialog, pane stays 'waiting' until validate_waiting_panes corrects it. This is a known limitation - the Notification event has no response/dismiss counterpart.",
     "Notification": [
       {
         "matcher": "permission_prompt|elicitation_dialog",
