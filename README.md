@@ -50,8 +50,8 @@ Any existing Claude Code sessions will be automatically discovered and registere
 | Key | Action |
 |-----|--------|
 | `prefix + Space` | Cycle to next Claude Code pane |
-| `prefix + C-Space` | Open picker menu |
-| `Alt + Space` | Jump back to previous pane (no prefix) |
+| `prefix + C-f` | Open picker menu |
+| `C-Space` | Jump back to previous pane (no prefix) |
 
 ### Configuration
 
@@ -61,11 +61,11 @@ Add to `~/.tmux.conf`:
 # Customize cycle key (default: Space)
 set -g @hop-cycle-key 'Space'
 
-# Customize picker key (default: C-Space)
-set -g @hop-picker-key 'C-Space'
+# Customize picker key (default: C-f)
+set -g @hop-picker-key 'C-f'
 
-# Customize back key (default: M-Space, root binding - no prefix)
-set -g @hop-back-key 'M-Space'
+# Customize back key (default: C-Space, root binding - no prefix)
+set -g @hop-back-key 'C-Space'
 
 # Cycle mode (default: priority)
 # - priority: cycle within highest-priority group only
