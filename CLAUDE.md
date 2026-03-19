@@ -34,7 +34,7 @@ src/claude_tmux_hop/
     windows.py    # Windows: PowerShell toast, COM focus, Win32 detection
     terminals.py  # Terminal app detection mappings (bundle IDs, env vars)
 hooks/
-  hooks.json      # Hook definitions (7 hooks)
+  hooks.json      # Hook definitions (9 hooks)
 hop.tmux          # TPM plugin entry point
 ```
 
@@ -117,6 +117,8 @@ Cross-platform notification and terminal focus using Strategy pattern:
 - PreToolUse (AskUserQuestion|ExitPlanMode) → waiting
 - PostToolUse → active (after user answers question or grants permission)
 - Notification (permission_prompt|elicitation_dialog) → waiting
+- Elicitation → waiting (MCP server requests user input)
+- ElicitationResult → active (user responded to MCP elicitation)
 - Stop → idle
 - SessionEnd → clear
 
