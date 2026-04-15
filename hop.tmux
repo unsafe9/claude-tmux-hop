@@ -76,6 +76,32 @@ hop_picker() {
     fi
 }
 
+# Show notification inbox using display-menu
+hop_inbox() {
+    local cmd
+    cmd=$(get_hop_cmd)
+    local menu_args=("-T" "#[align=centre]Notifications")
+    local line label pane_id
+    local count=0
+
+    while IFS=$'\t' read -r label pane_id; do
+        [[ -z "$label" ]] && continue
+        menu_args+=("$label" "" "run-shell '$cmd switch --pane $pane_id'")
+        count=$((count + 1))
+    done < <($cmd inbox)
+
+    if [[ $count -eq 0 ]]; then
+        tmux display-message "No notifications"
+        return 0
+    fi
+
+    # Separator + clear option
+    menu_args+=("" "" "")
+    menu_args+=("Clear" "x" "run-shell '$cmd inbox-clear'")
+
+    tmux display-menu "${menu_args[@]}"
+}
+
 # Main plugin setup
 main() {
     local cycle_key
@@ -86,6 +112,7 @@ main() {
     cycle_key=$(get_tmux_option @hop-cycle-key "Space")
     picker_key=$(get_tmux_option @hop-picker-key "C-f")
     back_key=$(get_tmux_option @hop-back-key "C-Space")
+    inbox_key=$(get_tmux_option @hop-inbox-key "i")
     cycle_mode=$(get_tmux_option @hop-cycle-mode "priority")
 
     # Wrapper script uses local project via PYTHONPATH
@@ -99,7 +126,10 @@ main() {
     tmux bind-key "$cycle_key" run-shell "$cmd cycle $cycle_args"
 
     # Bind picker key (prefix + key) - uses bash function from this script
-    tmux bind-key "$picker_key" run-shell "source '$CURRENT_DIR/hop.tmux' && hop_picker"
+    tmux bind-key "$picker_key" run-shell "bash -c 'source \"$CURRENT_DIR/hop.tmux\" && hop_picker'"
+
+    # Bind inbox key (prefix + key) - notification inbox
+    tmux bind-key "$inbox_key" run-shell "bash -c 'source \"$CURRENT_DIR/hop.tmux\" && hop_inbox'"
 
     # Bind back key (root binding, no prefix needed)
     tmux bind-key -n "$back_key" run-shell "$cmd back"

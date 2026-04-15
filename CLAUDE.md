@@ -21,6 +21,7 @@ src/claude_tmux_hop/
   parser.py       # CLI argument parser setup (argparse subcommands)
   tmux.py         # Tmux operations, PaneInfo dataclass
   priority.py     # State priority logic - see STATE_PRIORITY
+  inbox.py        # Notification inbox - JSONL storage in ~/.local/state/claude-tmux-hop/inbox.jsonl
   paths.py        # XDG/TPM path detection - see get_tmux_config_paths()
   doctor.py       # Environment checks - see run_all_checks()
   install.py      # Installation & update logic
@@ -55,6 +56,8 @@ claude-tmux-hop <command>
   discover                # Auto-discover Claude sessions
   prune                   # Remove stale panes
   status                  # Output status bar string
+  inbox                   # Output notification inbox for display menu
+  inbox-clear             # Clear notification inbox
 
   # Management commands
   install                 # Install tmux/claude plugins
@@ -86,6 +89,13 @@ See `cli.py:should_auto_hop()`, `do_auto_hop()`
 - `@hop-auto`: comma-separated states to trigger (default: empty = disabled)
 - `@hop-auto-priority-only`: only hop if highest priority (default: "on")
 
+### Notification Inbox
+See `inbox.py`, `cli.py:cmd_inbox()`
+- Records `waiting` and `idle` state changes to `~/.local/state/claude-tmux-hop/inbox.jsonl`
+- `@hop-inbox-key`: keybinding to open inbox display-menu (default: "i")
+- Max 50 entries stored, displays 20 most recent (priority order: waiting oldest first, idle newest first)
+- Each entry shows state icon, project name, time ago; clicking switches to pane
+
 ### Notification & Focus (notify/)
 Cross-platform notification and terminal focus using Strategy pattern:
 - `@hop-notify`: states that trigger OS notifications (default: empty = disabled)
@@ -99,9 +109,10 @@ Cross-platform notification and terminal focus using Strategy pattern:
 
 **Flow in `cmd_register()`:**
 1. Build `PaneContext` from current pane (pane_id, session, window, project)
-2. Call `handle_state_notifications(state, project, pane_context)`
-3. If `@hop-focus-app` matches: focus terminal app → tab → tmux window → pane
-4. If `@hop-notify` matches and terminal not focused: send OS notification
+2. Record to notification inbox (waiting/idle only)
+3. Call `handle_state_notifications(state, project, pane_context)`
+4. If `@hop-focus-app` matches: focus terminal app → tab → tmux window → pane
+5. If `@hop-notify` matches and terminal not focused: send OS notification
 
 **Smart Suppression:**
 - `is_terminal_focused()` checks if user is already looking at the terminal

@@ -11,10 +11,11 @@ from datetime import datetime
 
 from pathlib import Path
 
+from . import inbox
 from .log import log_cli_call, log_error, log_info
 from .notify import PaneContext, handle_state_notifications
 from .parser import create_parser
-from .priority import STATE_PRIORITY, get_cycle_group, group_by_state, sort_all_panes
+from .priority import STATE_PRIORITY, group_by_state, sort_all_panes
 from .tmux import (
     clear_pane_state,
     get_claude_panes_by_process,
@@ -216,6 +217,16 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Build pane context for notifications and focus
     pane_context = _build_pane_context(project)
 
+    # Record to notification inbox
+    if pane_context:
+        inbox.record(
+            state=args.state,
+            project=project,
+            pane_id=pane_context.pane_id,
+            session=pane_context.session,
+            window=pane_context.window,
+        )
+
     # Handle notifications and terminal focus
     handle_state_notifications(args.state, project, pane_context)
 
@@ -231,49 +242,58 @@ def cmd_clear(args: argparse.Namespace) -> int:
     """Clear the hop state from the current pane."""
     log_cli_call("clear")
     clear_pane_state()
+
+    # Remove from notification inbox
+    pane_id = os.environ.get("TMUX_PANE")
+    if pane_id:
+        inbox.remove_pane(pane_id)
+
     log_info("clear: state cleared")
     return 0
 
 
 @requires_tmux(silent=False)
 def cmd_cycle(args: argparse.Namespace) -> int:
-    """Cycle to the next pane in priority order."""
+    """Cycle to the next pane using the inbox list (priority order)."""
     log_cli_call("cycle", {"pane": args.pane} if args.pane else None)
 
-    # Auto-prune stale panes silently
-    for pane in get_stale_panes():
-        clear_pane_state(pane.id)
-        log_info(f"cycle: auto-pruned {pane.id}")
-
-    panes = get_hop_panes(validate=False)  # Already pruned above
-    validate_waiting_panes(panes)
-    if not panes:
-        log_info("cycle: no panes found")
-        run_tmux("display-message", "No Claude Code sessions found")
+    entries = inbox.get_entries()
+    if not entries:
+        log_info("cycle: no inbox entries")
+        run_tmux("display-message", "No notifications")
         return 0
 
-    # Get the group to cycle through
-    group = get_cycle_group(panes, mode=args.mode)
-    if not group:
-        log_info("cycle: no group found")
-        run_tmux("display-message", "No Claude Code sessions found")
-        return 0
+    # In priority mode, only cycle within the top priority group
+    if args.mode == "priority":
+        top_state = entries[0].state
+        entries = [e for e in entries if e.state == top_state]
 
     # Find current pane and select next
     # Prefer --pane arg (from tmux keybinding), fall back to get_current_pane()
     current = args.pane if args.pane else get_current_pane()
-    ids = [p.id for p in group]
+    ids = [e.pane_id for e in entries]
 
     try:
         idx = ids.index(current)
         next_idx = (idx + 1) % len(ids)
     except ValueError:
-        # Current pane not in group, go to first
         next_idx = 0
 
-    target = group[next_idx]
-    log_info(f"cycle → {target.session}:{target.window} {target.project} ({target.state})")
-    switch_to_pane(target.id, target.session, target.window)
+    # Try switching, skip stale entries
+    for _ in range(len(entries)):
+        target = entries[next_idx]
+        if switch_to_pane(target.pane_id, target.session, target.window):
+            log_info(f"cycle → {target.session}:{target.window} {target.project} ({target.state})")
+            return 0
+        # Pane gone — remove and try next
+        inbox.remove_pane(target.pane_id)
+        log_info(f"cycle: removed stale {target.pane_id}")
+        entries.pop(next_idx)
+        if not entries:
+            break
+        next_idx = next_idx % len(entries)
+
+    run_tmux("display-message", "No notifications")
     return 0
 
 
@@ -480,6 +500,31 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_inbox(args: argparse.Namespace) -> int:
+    """Output inbox entries for display menu (internal use).
+
+    Outputs one line per entry: "icon project  time_ago<TAB>pane_id"
+    """
+    entries = inbox.get_entries()
+    if not entries:
+        return 0
+
+    for entry in entries:
+        icon = STATE_ICONS.get(entry.state, "?")
+        time_ago = _format_time_ago(entry.timestamp)
+        label = f"{icon} {entry.project}  {time_ago}"
+        print(f"{label}\t{entry.pane_id}")
+
+    return 0
+
+
+def cmd_inbox_clear(args: argparse.Namespace) -> int:
+    """Clear all inbox notifications."""
+    inbox.clear()
+    run_tmux("display-message", "Notifications cleared", check=False)
+    return 0
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     """Interactive installation wizard."""
     from .install import (
@@ -633,6 +678,8 @@ def main() -> int:
         cmd_discover=cmd_discover,
         cmd_prune=cmd_prune,
         cmd_status=cmd_status,
+        cmd_inbox=cmd_inbox,
+        cmd_inbox_clear=cmd_inbox_clear,
         cmd_install=cmd_install,
         cmd_update=cmd_update,
         cmd_doctor=cmd_doctor,

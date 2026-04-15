@@ -27,6 +27,8 @@ def create_parser(
     cmd_discover: CommandHandler,
     cmd_prune: CommandHandler,
     cmd_status: CommandHandler,
+    cmd_inbox: CommandHandler,
+    cmd_inbox_clear: CommandHandler,
     cmd_install: CommandHandler,
     cmd_update: CommandHandler,
     cmd_doctor: CommandHandler,
@@ -175,6 +177,20 @@ def create_parser(
         help="Output status for tmux status bar",
     )
     status_parser.set_defaults(func=cmd_status)
+
+    # inbox command (internal)
+    inbox_parser = subparsers.add_parser(
+        "inbox",
+        help="Output notification inbox for display menu (internal)",
+    )
+    inbox_parser.set_defaults(func=cmd_inbox)
+
+    # inbox-clear command
+    inbox_clear_parser = subparsers.add_parser(
+        "inbox-clear",
+        help="Clear notification inbox",
+    )
+    inbox_clear_parser.set_defaults(func=cmd_inbox_clear)
 
     # --- Management commands ---
 

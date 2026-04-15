@@ -110,6 +110,17 @@ def get_cycle_group(panes: list[PaneInfo], mode: str = "priority") -> list[PaneI
             return []
 
 
+def priority_sort_key(state: str, timestamp: int) -> tuple[int, int]:
+    """Return a sort key for priority-ordered display and cycling.
+
+    waiting: oldest first (ascending timestamp)
+    idle/active: newest first (descending timestamp)
+    """
+    priority = STATE_PRIORITY.get(state, 2)
+    ts = timestamp if state == "waiting" else -timestamp
+    return (priority, ts)
+
+
 def sort_all_panes(panes: list[PaneInfo]) -> list[PaneInfo]:
     """Sort all panes by priority for picker display.
 
@@ -119,11 +130,4 @@ def sort_all_panes(panes: list[PaneInfo]) -> list[PaneInfo]:
     Returns:
         Sorted list: waiting (oldest first), idle (newest first), active (newest first)
     """
-
-    def sort_key(pane: PaneInfo) -> tuple[int, int]:
-        priority = STATE_PRIORITY.get(pane.state, 2)
-        # waiting: oldest first (ascending), others: newest first (descending)
-        ts = pane.timestamp if pane.state == "waiting" else -pane.timestamp
-        return (priority, ts)
-
-    return sorted(panes, key=sort_key)
+    return sorted(panes, key=lambda p: priority_sort_key(p.state, p.timestamp))
