@@ -12,7 +12,11 @@ from .log import log_debug, log_error, log_info
 # Dialog detection constants
 PROMPT_CHAR = "❯"  # Claude Code input prompt / Ink selection cursor (U+276F)
 STATUS_SEPARATOR = "─"  # Box drawing character in status bar separator (U+2500)
-WAITING_STALE_THRESHOLD = 3  # Seconds before checking a "waiting" pane
+WAITING_STALE_THRESHOLD = 30  # Seconds a pane must stay "waiting" before we
+# capture-pane and verify the dialog is still active. Tuned to keep the
+# status-bar polling path cheap; UserPromptSubmit/Stop hooks already flip state
+# naturally when Claude sees the response, so this only catches rare
+# out-of-band dialog dismissals (ctrl+C etc.).
 
 
 
@@ -499,10 +503,13 @@ def validate_waiting_panes(panes: list[PaneInfo]) -> None:
     """Check stale "waiting" panes and flip to "idle" if dialog is dismissed.
 
     Mutates panes in-place when a stale waiting pane's dialog is no longer active.
+    Also records the flip to the notification inbox so both views stay in sync.
 
     Args:
         panes: List of PaneInfo objects (modified in-place)
     """
+    from . import inbox
+
     now = int(time.time())
 
     for pane in panes:
@@ -516,11 +523,21 @@ def validate_waiting_panes(panes: list[PaneInfo]) -> None:
         if not content:
             continue  # Pane gone or empty, skip
 
-        if not has_active_dialog(content):
-            try:
-                set_pane_state("idle", pane.id)
-                pane.state = "idle"
-                pane.timestamp = now
-                log_info(f"validate: {pane.id} flipped waiting → idle (dialog dismissed)")
-            except RuntimeError:
-                pass  # Pane may have disappeared
+        if has_active_dialog(content):
+            continue
+
+        try:
+            set_pane_state("idle", pane.id)
+        except RuntimeError:
+            continue  # Pane may have disappeared
+
+        pane.state = "idle"
+        pane.timestamp = now
+        inbox.record(
+            state="idle",
+            project=pane.project,
+            pane_id=pane.id,
+            session=pane.session,
+            window=pane.window,
+        )
+        log_info(f"validate: {pane.id} flipped waiting → idle (dialog dismissed)")

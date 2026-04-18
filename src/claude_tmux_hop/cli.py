@@ -257,6 +257,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     """Cycle to the next pane using the inbox list (priority order)."""
     log_cli_call("cycle", {"pane": args.pane} if args.pane else None)
 
+    validate_waiting_panes(get_hop_panes(validate=False))
     entries = inbox.get_entries()
     if not entries:
         log_info("cycle: no inbox entries")
@@ -505,6 +506,7 @@ def cmd_inbox(args: argparse.Namespace) -> int:
 
     Outputs one line per entry: "icon project  time_ago<TAB>pane_id"
     """
+    validate_waiting_panes(get_hop_panes(validate=False))
     entries = inbox.get_entries()
     if not entries:
         return 0

@@ -74,7 +74,7 @@ def test_priority_sorting() -> list[TestResult]:
 
     # Test sort_all_panes
     sorted_panes = sort_all_panes(panes)
-    expected_order = ["%4", "%2", "%3", "%1"]  # waiting oldest, waiting newer, idle, active
+    expected_order = ["%2", "%4", "%3", "%1"]  # waiting newest, waiting older, idle, active
     actual_order = [p.id for p in sorted_panes]
 
     results.append(
@@ -87,7 +87,7 @@ def test_priority_sorting() -> list[TestResult]:
 
     # Test get_cycle_group priority mode
     group = get_cycle_group(panes, mode="priority")
-    expected_ids = ["%4", "%2"]  # Only waiting panes, oldest first
+    expected_ids = ["%2", "%4"]  # Only waiting panes, newest first
     actual_ids = [p.id for p in group]
 
     results.append(

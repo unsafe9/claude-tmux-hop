@@ -79,7 +79,7 @@ def get_entries(limit: int = DEFAULT_DISPLAY_LIMIT) -> list[InboxEntry]:
     """Read inbox entries in priority order (cycle order).
 
     Deduplicates by pane_id (keeps most recent per pane),
-    then sorts by priority: waiting oldest first, idle newest first.
+    then sorts by priority (waiting → idle), newest first within each group.
 
     Args:
         limit: Maximum number of entries to return
@@ -108,6 +108,8 @@ def get_entries(limit: int = DEFAULT_DISPLAY_LIMIT) -> list[InboxEntry]:
     except OSError:
         return []
 
+    # Sort desc first so the dedup pass keeps the most recent entry per pane,
+    # then sort by priority bucket (newest-first within each) for cycle order.
     entries.sort(key=lambda e: -e.timestamp)
 
     seen: set[str] = set()

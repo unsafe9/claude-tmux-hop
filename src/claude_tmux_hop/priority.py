@@ -52,25 +52,9 @@ def group_by_state(panes: list[PaneInfo]) -> dict[str, list[PaneInfo]]:
     return groups
 
 
-def sort_within_group(panes: list[PaneInfo], state: str) -> list[PaneInfo]:
-    """Sort panes within a state group.
-
-    - waiting: oldest first (ascending timestamp)
-    - idle/active: newest first (descending timestamp)
-
-    Args:
-        panes: List of panes in the same state
-        state: The state of the panes
-
-    Returns:
-        Sorted list of panes
-    """
-    if state == "waiting":
-        # Oldest first - ascending timestamp
-        return sorted(panes, key=lambda p: p.timestamp)
-    else:
-        # Newest first - descending timestamp
-        return sorted(panes, key=lambda p: -p.timestamp)
+def sort_within_group(panes: list[PaneInfo]) -> list[PaneInfo]:
+    """Sort panes in a state group, newest timestamp first."""
+    return sorted(panes, key=lambda p: -p.timestamp)
 
 
 def get_cycle_group(panes: list[PaneInfo], mode: str = "priority") -> list[PaneInfo]:
@@ -78,9 +62,9 @@ def get_cycle_group(panes: list[PaneInfo], mode: str = "priority") -> list[PaneI
 
     Modes:
     - priority: Cycle within highest-priority non-empty group only
-      (waiting -> idle -> active)
-    - flat: All panes combined, sorted by priority then timestamp
-      (waiting oldest first, then idle newest first, then active newest first)
+      (waiting -> idle -> active), newest first within the group
+    - flat: All panes combined, sorted by priority then newest first
+      (waiting, then idle, then active — each group newest first)
 
     Args:
         panes: All panes with hop state
@@ -92,33 +76,25 @@ def get_cycle_group(panes: list[PaneInfo], mode: str = "priority") -> list[PaneI
     groups = group_by_state(panes)
 
     if mode == "flat":
-        # All panes combined: waiting (oldest first), idle (newest first), active (newest first)
         result: list[PaneInfo] = []
-        for state in ["waiting", "idle", "active"]:
+        for state in ("waiting", "idle", "active"):
             if groups[state]:
-                result.extend(sort_within_group(groups[state], state))
+                result.extend(sort_within_group(groups[state]))
         return result
-    else:
-        # priority mode (default): cycle within single highest-priority group
-        if groups["waiting"]:
-            return sort_within_group(groups["waiting"], "waiting")
-        elif groups["idle"]:
-            return sort_within_group(groups["idle"], "idle")
-        elif groups["active"]:
-            return sort_within_group(groups["active"], "active")
-        else:
-            return []
+
+    for state in ("waiting", "idle", "active"):
+        if groups[state]:
+            return sort_within_group(groups[state])
+    return []
 
 
 def priority_sort_key(state: str, timestamp: int) -> tuple[int, int]:
     """Return a sort key for priority-ordered display and cycling.
 
-    waiting: oldest first (ascending timestamp)
-    idle/active: newest first (descending timestamp)
+    All states sort newest first within their priority bucket.
     """
     priority = STATE_PRIORITY.get(state, 2)
-    ts = timestamp if state == "waiting" else -timestamp
-    return (priority, ts)
+    return (priority, -timestamp)
 
 
 def sort_all_panes(panes: list[PaneInfo]) -> list[PaneInfo]:
@@ -128,6 +104,6 @@ def sort_all_panes(panes: list[PaneInfo]) -> list[PaneInfo]:
         panes: All panes with hop state
 
     Returns:
-        Sorted list: waiting (oldest first), idle (newest first), active (newest first)
+        Sorted list: waiting -> idle -> active, each group newest first
     """
     return sorted(panes, key=lambda p: priority_sort_key(p.state, p.timestamp))

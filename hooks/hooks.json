@@ -3,6 +3,7 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|resume",
         "hooks": [
           {
             "type": "command",
@@ -43,6 +44,17 @@
         ]
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "AskUserQuestion|ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
+          }
+        ]
+      }
+    ],
     "Notification": [
       {
         "matcher": "permission_prompt|elicitation_dialog",
@@ -50,6 +62,15 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting"
+          }
+        ]
+      },
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle"
           }
         ]
       }
@@ -80,6 +101,36 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
           }
         ]
       }

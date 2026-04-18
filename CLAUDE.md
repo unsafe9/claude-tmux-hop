@@ -69,7 +69,7 @@ claude-tmux-hop <command>
 
 ### State Priority
 See `priority.py:STATE_PRIORITY`
-- `waiting` (0): user input needed - oldest first
+- `waiting` (0): user input needed - newest first
 - `idle` (1): task complete - newest first
 - `active` (2): running - newest first
 
@@ -93,7 +93,7 @@ See `cli.py:should_auto_hop()`, `do_auto_hop()`
 See `inbox.py`, `cli.py:cmd_inbox()`
 - Records `waiting` and `idle` state changes to `~/.local/state/claude-tmux-hop/inbox.jsonl`
 - `@hop-inbox-key`: keybinding to open inbox display-menu (default: "i")
-- Max 50 entries stored, displays 20 most recent (priority order: waiting oldest first, idle newest first)
+- Max 50 entries stored, displays 20 most recent (priority order: waiting → idle, each group newest first; stale waiting panes auto-flip to idle)
 - Each entry shows state icon, project name, time ago; clicking switches to pane
 
 ### Notification & Focus (notify/)
@@ -123,14 +123,16 @@ Cross-platform notification and terminal focus using Strategy pattern:
 - Falls back to AppleScript `display notification` (no click action)
 
 ### Hook Flow (hooks.json)
-- SessionStart → idle
+- SessionStart (startup|resume) → idle
 - UserPromptSubmit → active
 - PreToolUse (AskUserQuestion|ExitPlanMode) → waiting
-- PostToolUse → active (after user answers question or grants permission)
+- PostToolUse / PostToolUseFailure (AskUserQuestion|ExitPlanMode) → active
 - Notification (permission_prompt|elicitation_dialog) → waiting
+- Notification (idle_prompt) → idle
 - Elicitation → waiting (MCP server requests user input)
 - ElicitationResult → active (user responded to MCP elicitation)
-- Stop → idle
+- Stop / StopFailure → idle
+- PreCompact / PostCompact → active (compact is work; resumes after)
 - SessionEnd → clear
 
 ## Code Conventions

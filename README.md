@@ -131,13 +131,13 @@ The CLI is bundled within each plugin and invoked automatically by tmux keybindi
 Controlled by `@hop-cycle-mode` (default: `priority`):
 
 **Priority mode** (`set -g @hop-cycle-mode 'priority'`):
-1. If waiting panes exist, cycle only through waiting panes (oldest first)
+1. If waiting panes exist, cycle only through waiting panes (newest first)
 2. If no waiting, cycle through idle panes (newest first)
 3. If no idle, cycle through active panes (newest first)
 
 **Flat mode** (`set -g @hop-cycle-mode 'flat'`):
 - Cycle through all panes in priority order (waiting → idle → active)
-- Within each priority level, sorted by timestamp
+- Within each priority level, newest first
 
 ### State Storage
 
