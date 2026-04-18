@@ -115,26 +115,6 @@
         ]
       }
     ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
-          }
-        ]
-      }
-    ],
-    "PostCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
-          }
-        ]
-      }
-    ],
     "SessionEnd": [
       {
         "hooks": [

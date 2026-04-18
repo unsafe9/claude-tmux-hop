@@ -132,8 +132,10 @@ Cross-platform notification and terminal focus using Strategy pattern:
 - Elicitation → waiting (MCP server requests user input)
 - ElicitationResult → active (user responded to MCP elicitation)
 - Stop / StopFailure → idle
-- PreCompact / PostCompact → active (compact is work; resumes after)
 - SessionEnd → clear
+- Intentionally *not* hooked: PreCompact, PostCompact, SessionStart(compact|clear),
+  SubagentStart/Stop — these are infra events, not user-visible state transitions,
+  so existing state is preserved.
 
 ## Code Conventions
 
