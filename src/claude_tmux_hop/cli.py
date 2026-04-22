@@ -257,7 +257,14 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     """Cycle to the next pane using the inbox list (priority order)."""
     log_cli_call("cycle", {"pane": args.pane} if args.pane else None)
 
-    validate_waiting_panes(get_hop_panes(validate=False))
+    hop_panes = get_hop_panes(validate=False)
+    validate_waiting_panes(hop_panes)
+    # Reuse the list-panes result for live session/window; inbox entries store
+    # the location at record time and can drift when panes are moved between
+    # windows, which would make tmux land on the wrong window before following
+    # the pane id.
+    live_loc = {p.id: (p.session, p.window) for p in hop_panes}
+
     entries = inbox.get_entries()
     if not entries:
         log_info("cycle: no inbox entries")
@@ -280,13 +287,12 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     except ValueError:
         next_idx = 0
 
-    # Try switching, skip stale entries
     for _ in range(len(entries)):
         target = entries[next_idx]
-        if switch_to_pane(target.pane_id, target.session, target.window):
-            log_info(f"cycle → {target.session}:{target.window} {target.project} ({target.state})")
+        loc = live_loc.get(target.pane_id)
+        if loc and switch_to_pane(target.pane_id, loc[0], loc[1]):
+            log_info(f"cycle → {target.project} ({target.state}) {target.pane_id}")
             return 0
-        # Pane gone — remove and try next
         inbox.remove_pane(target.pane_id)
         log_info(f"cycle: removed stale {target.pane_id}")
         entries.pop(next_idx)

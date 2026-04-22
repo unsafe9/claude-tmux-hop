@@ -376,13 +376,11 @@ def switch_to_pane(
         store_previous: If True, store current pane in @hop-previous-pane for jump-back
 
     Returns:
-        True if switch was successful, False if pane not found
+        True if switch was successful, False if pane not found or tmux rejected the switch
     """
-    # Store current pane as previous before switching (for jump-back)
-    if store_previous:
-        current_pane = get_current_pane()
-        if current_pane and current_pane != pane_id:
-            set_global_option("@hop-previous-pane", current_pane)
+    # Capture origin up front; persist only after a successful switch so a
+    # failed call can't poison @hop-previous-pane.
+    origin_pane = get_current_pane() if store_previous else None
 
     # Look up session if not provided
     if target_session is None:
@@ -412,19 +410,24 @@ def switch_to_pane(
     # Get current session and window
     current_session, current_window = get_current_session_window()
 
-    # Switch session/window as needed, then select the pane
-    if target_session != current_session:
-        # Different session: switch-client to session:window
-        if target_window is not None:
-            run_tmux("switch-client", "-t", f"{target_session}:{target_window}")
-        else:
-            run_tmux("switch-client", "-t", target_session)
-    elif target_window is not None and target_window != current_window:
-        # Same session, different window: select-window first
-        run_tmux("select-window", "-t", f"{target_session}:{target_window}")
+    # Any of switch-client/select-window/select-pane may fail if the target
+    # has disappeared between lookup and now; report that as a soft failure
+    # so callers (cmd_cycle, etc.) can prune stale entries instead of crashing.
+    try:
+        if target_session != current_session:
+            if target_window is not None:
+                run_tmux("switch-client", "-t", f"{target_session}:{target_window}")
+            else:
+                run_tmux("switch-client", "-t", target_session)
+        elif target_window is not None and target_window != current_window:
+            run_tmux("select-window", "-t", f"{target_session}:{target_window}")
 
-    # Select the pane
-    run_tmux("select-pane", "-t", pane_id)
+        run_tmux("select-pane", "-t", pane_id)
+    except RuntimeError:
+        return False
+
+    if origin_pane and origin_pane != pane_id:
+        set_global_option("@hop-previous-pane", origin_pane)
 
     return True
 

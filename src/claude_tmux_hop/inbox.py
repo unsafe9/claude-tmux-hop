@@ -38,9 +38,13 @@ def record(
 ) -> None:
     """Record a state change to the inbox.
 
-    Only records states in INBOX_STATES (waiting, idle).
+    Only waiting/idle transitions are appended. For non-inbox states
+    (e.g. active) the pane's prior entry is dropped — the user has
+    attended to it, so leaving a stale waiting/idle record would skew
+    priority cycling toward panes that aren't actually pending.
     """
     if state not in INBOX_STATES:
+        remove_pane(pane_id)
         return
 
     entry = {
@@ -128,8 +132,12 @@ def remove_pane(pane_id: str) -> None:
     try:
         # record() uses compact separators, so the key format is deterministic
         needle = f'"pane_id":"{pane_id}"'
-        lines = INBOX_FILE.read_text().splitlines()
-        filtered = [line for line in lines if line.strip() and needle not in line]
+        content = INBOX_FILE.read_text()
+        # Active-state hooks fire this on every transition; skipping the
+        # rewrite when the pane has no entry saves a write + fsync per call.
+        if needle not in content:
+            return
+        filtered = [line for line in content.splitlines() if line.strip() and needle not in line]
 
         if filtered:
             INBOX_FILE.write_text("\n".join(filtered) + "\n")
