@@ -228,10 +228,10 @@ def cmd_register(args: argparse.Namespace) -> int:
         )
 
     # Handle notifications and terminal focus
-    handle_state_notifications(args.state, project, pane_context)
+    focus_handled = handle_state_notifications(args.state, project, pane_context)
 
-    # Check for auto-hop
-    if should_auto_hop(args.state):
+    # Avoid double-switching: auto-hop is only a fallback when focus didn't act.
+    if not focus_handled and should_auto_hop(args.state):
         do_auto_hop()
 
     return 0

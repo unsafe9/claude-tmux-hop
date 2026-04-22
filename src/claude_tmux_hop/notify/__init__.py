@@ -267,45 +267,46 @@ def focus_terminal(pane_context: PaneContext | None = None) -> bool:
     return False
 
 
-def handle_state_notifications(state: str, project: str, pane_context: PaneContext | None = None) -> None:
+def handle_state_notifications(state: str, project: str, pane_context: PaneContext | None = None) -> bool:
     """Handle all notification actions for a state change.
 
-    Args:
-        state: The new state ("waiting", "idle", "active")
-        project: Project name for notification message
-        pane_context: Optional pane context for click-to-focus and tmux navigation
+    Returns True when the focus path either moved focus or was correctly
+    suppressed because the terminal was already focused, so the caller can
+    skip redundant fallbacks like auto-hop. Returns False when no focus was
+    configured or when focus_terminal failed — callers may then run a
+    fallback switch.
     """
     wants_focus = should_focus_app(state)
     wants_notify = should_notify(state)
 
-    # If neither enabled, nothing to do
     if not wants_focus and not wants_notify:
-        return
+        return False
 
-    # Check focus state BEFORE focus_terminal() changes it
-    already_focused = is_terminal_focused() if wants_notify else False
+    # Single probe gates both paths so we don't steal focus from a user
+    # already looking at the terminal.
+    already_focused = is_terminal_focused()
 
-    # Terminal focus (if enabled) - full navigation
+    focus_handled = False
     if wants_focus:
-        if focus_terminal(pane_context):
+        if already_focused:
+            log_info(f"focus suppressed: terminal already focused ({state})")
+            focus_handled = True
+        elif focus_terminal(pane_context):
             log_info(f"terminal focused: {state}")
+            focus_handled = True
         else:
             log_debug(f"terminal focus failed (silent): {state}")
 
-    # System notification (if enabled)
     if wants_notify:
-        # Smart suppression: skip if terminal was already focused before we acted
         if already_focused:
-            log_info(f"notification suppressed: terminal already focused")
-            return
-
-        title = "Claude Code"
-        message = f"{project}: {state}"
-
-        # If focus is disabled, enable click-to-focus in notification
-        click_context = None if wants_focus else pane_context
-
-        if send_notification(title, message, click_context):
-            log_info(f"notification sent: {state}")
+            log_info("notification suppressed: terminal already focused")
         else:
-            log_debug(f"notification failed (silent): {state}")
+            title = "Claude Code"
+            message = f"{project}: {state}"
+            click_context = None if wants_focus else pane_context
+            if send_notification(title, message, click_context):
+                log_info(f"notification sent: {state}")
+            else:
+                log_debug(f"notification failed (silent): {state}")
+
+    return focus_handled

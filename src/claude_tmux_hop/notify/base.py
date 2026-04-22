@@ -145,13 +145,25 @@ def run_command_output(
 def switch_tmux_pane(ctx: PaneContext) -> None:
     """Switch to the specified tmux window and pane.
 
-    This is a shared utility used by all platform FocusHandler implementations
-    after focusing the terminal app/tab.
+    Shared utility used by all platform FocusHandler implementations after
+    focusing the terminal app/tab. No-op when the active pane already matches
+    the target, so repeated hook-driven calls on the same pane don't perturb
+    tmux focus.
 
     Args:
         ctx: Pane context with session, window, and pane_id
     """
+    # Local import avoids package init order issues; ..tmux has no inbound
+    # notify dependency so this is not circular.
+    from ..tmux import get_current_pane, get_current_session_window
+
     try:
+        if (
+            get_current_pane() == ctx.pane_id
+            and get_current_session_window() == (ctx.session, ctx.window)
+        ):
+            return
+
         subprocess.run(
             ["tmux", "select-window", "-t", f"{ctx.session}:{ctx.window}"],
             capture_output=True,
@@ -164,5 +176,5 @@ def switch_tmux_pane(ctx: PaneContext) -> None:
             timeout=SUBPROCESS_TIMEOUT,
             check=False,
         )
-    except (subprocess.SubprocessError, OSError):
+    except (subprocess.SubprocessError, OSError, RuntimeError):
         pass
