@@ -206,24 +206,36 @@ def should_focus_app(state: str) -> bool:
 # =============================================================================
 
 
-def is_terminal_focused() -> bool:
+def is_terminal_focused(
+    app_name: str | None = None,
+    session_name: str | None = None,
+) -> bool:
     """Check if terminal app (and optionally tab) is currently focused.
 
     Used to suppress OS notifications when user is already looking at terminal.
 
+    Args:
+        app_name: Pre-resolved terminal app name, resolved via _get_terminal_app
+            when omitted. Pass this when the caller already detected the app
+            to avoid a duplicate `tmux show-option` subprocess.
+        session_name: Pre-resolved tmux session name, resolved via
+            _get_tmux_session_name when omitted.
+
     Returns:
-        True if terminal is focused, False otherwise or if detection fails
+        True if terminal is focused, False otherwise or if detection fails.
     """
     platform = get_platform()
     detector_class = FOCUS_DETECTORS.get(platform)
     if not detector_class:
-        return False  # Assume not focused if can't detect
+        return False
 
-    app_name = _get_terminal_app()
+    if app_name is None:
+        app_name = _get_terminal_app()
     if not app_name:
         return False
 
-    session_name = _get_tmux_session_name()
+    if session_name is None:
+        session_name = _get_tmux_session_name()
     return detector_class().is_focused(app_name, session_name)
 
 
@@ -245,16 +257,25 @@ def send_notification(title: str, message: str, on_click: PaneContext | None = N
     return False
 
 
-def focus_terminal(pane_context: PaneContext | None = None) -> bool:
+def focus_terminal(
+    pane_context: PaneContext | None = None,
+    app_name: str | None = None,
+    session_name: str | None = None,
+) -> bool:
     """Bring terminal app to foreground and switch to pane.
 
     Args:
-        pane_context: Optional context for tmux pane navigation
+        pane_context: Optional context for tmux pane navigation.
+        app_name: Pre-resolved terminal app name, resolved via _get_terminal_app
+            when omitted.
+        session_name: Pre-resolved tmux session name, resolved via
+            _get_tmux_session_name when omitted.
 
     Returns:
-        True on success
+        True on success.
     """
-    app_name = _get_terminal_app()
+    if app_name is None:
+        app_name = _get_terminal_app()
     if not app_name:
         log_debug("focus: could not detect terminal app")
         return False
@@ -262,7 +283,8 @@ def focus_terminal(pane_context: PaneContext | None = None) -> bool:
     platform = get_platform()
     handler_class = FOCUS_HANDLERS.get(platform)
     if handler_class:
-        session_name = _get_tmux_session_name()
+        if session_name is None:
+            session_name = _get_tmux_session_name()
         return handler_class().focus(app_name, session_name, pane_context)
     return False
 
@@ -282,16 +304,21 @@ def handle_state_notifications(state: str, project: str, pane_context: PaneConte
     if not wants_focus and not wants_notify:
         return False
 
+    # Resolve terminal identity once; the probe and the focus path both need it
+    # and each resolution issues a tmux subprocess.
+    app_name = _get_terminal_app()
+    session_name = _get_tmux_session_name() if app_name else None
+
     # Single probe gates both paths so we don't steal focus from a user
     # already looking at the terminal.
-    already_focused = is_terminal_focused()
+    already_focused = is_terminal_focused(app_name, session_name)
 
     focus_handled = False
     if wants_focus:
         if already_focused:
             log_info(f"focus suppressed: terminal already focused ({state})")
             focus_handled = True
-        elif focus_terminal(pane_context):
+        elif focus_terminal(pane_context, app_name, session_name):
             log_info(f"terminal focused: {state}")
             focus_handled = True
         else:
