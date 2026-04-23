@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 
-from .base import run_command, run_command_output, PaneContext, switch_tmux_pane
+from .base import run_command, run_command_output, PaneContext
 
 
 class LinuxNotifier:
@@ -32,10 +32,14 @@ class LinuxNotifier:
 
 
 class LinuxFocusHandler:
-    """Focus terminal windows on Linux using wmctrl or xdotool."""
+    """Focus terminal windows on Linux using wmctrl or xdotool.
 
-    def focus(self, app_name: str, session_name: str | None = None,
-              pane_context: PaneContext | None = None) -> bool:
+    Only handles OS-level window focus. Tmux pane navigation is handled
+    separately by the auto-hop path so both can run independently on the
+    same event.
+    """
+
+    def focus(self, app_name: str, session_name: str | None = None) -> bool:
         """Bring terminal window to foreground.
 
         Tries wmctrl first, falls back to xdotool.
@@ -43,19 +47,11 @@ class LinuxFocusHandler:
         Args:
             app_name: Name of the application window to focus
             session_name: Optional tmux session name for window matching
-            pane_context: Optional tmux pane context for pane-level focusing
 
         Returns:
             True if window was focused successfully
         """
-        # First: focus the window
-        focused = self._focus_window(app_name, session_name)
-
-        # Then: switch tmux pane if context provided
-        if focused and pane_context:
-            switch_tmux_pane(pane_context)
-
-        return focused
+        return self._focus_window(app_name, session_name)
 
     def _focus_window(self, app_name: str, session_name: str | None) -> bool:
         """Focus the terminal window using wmctrl or xdotool."""

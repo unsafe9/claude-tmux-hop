@@ -47,22 +47,22 @@ class Notifier(Protocol):
 class FocusHandler(Protocol):
     """Protocol for focusing terminal applications.
 
-    Implementations should handle platform-specific window activation
-    and optionally support tab-level focusing for specific apps.
+    Implementations handle only the OS-level focus (app/window, and optionally
+    tab for tab-aware apps like iTerm / Terminal.app). Tmux pane navigation is
+    a separate concern handled by the auto-hop path in the CLI — focus and
+    pane hopping run independently so both can take effect on the same event.
     """
 
     def focus(
         self,
         app_name: str,
         session_name: str | None = None,
-        pane_context: PaneContext | None = None,
     ) -> bool:
         """Bring the terminal application to the foreground.
 
         Args:
             app_name: Name of the application to focus
             session_name: Optional tmux session name for tab-specific focusing
-            pane_context: Optional pane context for full tmux navigation
 
         Returns:
             True if focus was successful, False otherwise
@@ -140,41 +140,3 @@ def run_command_output(
         return None
     except (subprocess.SubprocessError, OSError):
         return None
-
-
-def switch_tmux_pane(ctx: PaneContext) -> None:
-    """Switch to the specified tmux window and pane.
-
-    Shared utility used by all platform FocusHandler implementations after
-    focusing the terminal app/tab. No-op when the active pane already matches
-    the target, so repeated hook-driven calls on the same pane don't perturb
-    tmux focus.
-
-    Args:
-        ctx: Pane context with session, window, and pane_id
-    """
-    # Local import avoids package init order issues; ..tmux has no inbound
-    # notify dependency so this is not circular.
-    from ..tmux import get_current_pane, get_current_session_window
-
-    try:
-        if (
-            get_current_pane() == ctx.pane_id
-            and get_current_session_window() == (ctx.session, ctx.window)
-        ):
-            return
-
-        subprocess.run(
-            ["tmux", "select-window", "-t", f"{ctx.session}:{ctx.window}"],
-            capture_output=True,
-            timeout=SUBPROCESS_TIMEOUT,
-            check=False,
-        )
-        subprocess.run(
-            ["tmux", "select-pane", "-t", ctx.pane_id],
-            capture_output=True,
-            timeout=SUBPROCESS_TIMEOUT,
-            check=False,
-        )
-    except (subprocess.SubprocessError, OSError, RuntimeError):
-        pass

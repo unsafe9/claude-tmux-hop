@@ -158,11 +158,31 @@ def should_auto_hop(new_state: str) -> bool:
     return True
 
 
-def do_auto_hop() -> None:
-    """Perform auto-hop to the current pane.
+def do_auto_hop(pane_context: PaneContext | None = None) -> None:
+    """Perform auto-hop to the target pane.
 
-    Should be called from the pane that's changing state.
+    Uses the full session+window+pane context when available so cross-session
+    and cross-window jumps land on the exact pane. Falls back to the current
+    TMUX_PANE when no context was resolved (e.g. tmux lookup failed).
+
+    switch_to_pane is a no-op when the caller is already on the target pane,
+    so running this unconditionally from hook handlers is safe.
     """
+    if pane_context is not None:
+        success = switch_to_pane(
+            pane_context.pane_id,
+            target_session=pane_context.session,
+            target_window=pane_context.window,
+        )
+        if success:
+            log_info(
+                f"auto-hop: switched to {pane_context.session}:"
+                f"{pane_context.window}.{pane_context.pane_id}"
+            )
+        else:
+            log_error(f"auto-hop: failed to switch to {pane_context.pane_id}")
+        return
+
     current_pane = os.environ.get("TMUX_PANE")
     if not current_pane:
         log_info("auto-hop: no TMUX_PANE, skipping")
@@ -227,12 +247,14 @@ def cmd_register(args: argparse.Namespace) -> int:
             window=pane_context.window,
         )
 
-    # Handle notifications and terminal focus
-    focus_handled = handle_state_notifications(args.state, project, pane_context)
+    # Focus and auto-hop are independent: app focus is an OS-level action,
+    # tmux pane hopping is a tmux-level action. Both must be free to trigger
+    # on the same event — e.g. user is already on the terminal but a
+    # different pane needs to come to the front.
+    handle_state_notifications(args.state, project, pane_context)
 
-    # Avoid double-switching: auto-hop is only a fallback when focus didn't act.
-    if not focus_handled and should_auto_hop(args.state):
-        do_auto_hop()
+    if should_auto_hop(args.state):
+        do_auto_hop(pane_context)
 
     return 0
 

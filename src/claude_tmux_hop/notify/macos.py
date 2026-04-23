@@ -7,7 +7,7 @@ import shlex
 import shutil
 import subprocess
 
-from .base import SUBPROCESS_TIMEOUT, PaneContext, run_command, switch_tmux_pane
+from .base import SUBPROCESS_TIMEOUT, PaneContext, run_command
 
 
 def _escape_applescript_string(s: str) -> str:
@@ -227,14 +227,16 @@ class MacOSFocusHandler:
     """macOS focus handler using AppleScript.
 
     Supports tab-specific focusing for iTerm2 and Terminal.app,
-    with fallback to simple app activation for other apps.
+    with fallback to simple app activation for other apps. Tmux pane
+    navigation is intentionally not handled here — the auto-hop path
+    runs independently so a single event can trigger both an app focus
+    and a pane hop without coupling.
     """
 
     def focus(
         self,
         app_name: str,
         session_name: str | None = None,
-        pane_context: PaneContext | None = None,
     ) -> bool:
         """Bring the terminal application to the foreground.
 
@@ -245,19 +247,11 @@ class MacOSFocusHandler:
         Args:
             app_name: Name of the application to focus
             session_name: Optional tmux session name for tab-specific focusing
-            pane_context: Optional pane context for tmux window/pane switching
 
         Returns:
             True if focus was successful, False otherwise
         """
-        # First: focus the app/tab
-        focused = self._focus_app_and_tab(app_name, session_name)
-
-        # Then: switch tmux window/pane if context provided
-        if focused and pane_context:
-            switch_tmux_pane(pane_context)
-
-        return focused
+        return self._focus_app_and_tab(app_name, session_name)
 
     def _focus_app_and_tab(self, app_name: str, session_name: str | None) -> bool:
         """Focus the app and optionally a specific tab.

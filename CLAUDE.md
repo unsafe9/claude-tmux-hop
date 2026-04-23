@@ -111,13 +111,21 @@ Cross-platform notification and terminal focus using Strategy pattern:
 **Flow in `cmd_register()`:**
 1. Build `PaneContext` from current pane (pane_id, session, window, project)
 2. Record to notification inbox (waiting/idle only)
-3. Call `handle_state_notifications(state, project, pane_context)`
-4. If `@hop-focus-app` matches: focus terminal app → tab → tmux window → pane
-5. If `@hop-notify` matches and terminal not focused: send OS notification
+3. Call `handle_state_notifications(state, project, pane_context)`:
+   - If `@hop-focus-app` matches: focus terminal app/tab only (OS-level)
+   - If `@hop-notify` matches and terminal not focused: send OS notification
+4. If `@hop-auto` matches: call `do_auto_hop(pane_context)` → switch to target
+   `session:window.pane` via tmux (no-op when already on that pane)
+
+Focus (`@hop-focus-app`) and auto-hop (`@hop-auto`) are independent actions
+and both fire when configured for the same state. App focus handles the OS
+window/tab; auto-hop handles tmux pane navigation. They do not short-circuit
+each other.
 
 **Smart Suppression:**
 - `is_terminal_focused()` checks if user is already looking at the terminal
-- Skips notification if terminal (and correct tab on macOS) is focused
+- Skips notification and app focus if terminal (and correct tab on macOS) is focused
+- Does **not** skip auto-hop — being on the terminal does not mean being on the right pane
 
 **Click-to-Focus (macOS only, optional):**
 - Uses `terminal-notifier` if installed (external dep, not required)

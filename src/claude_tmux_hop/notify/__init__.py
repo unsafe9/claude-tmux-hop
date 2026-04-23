@@ -258,14 +258,16 @@ def send_notification(title: str, message: str, on_click: PaneContext | None = N
 
 
 def focus_terminal(
-    pane_context: PaneContext | None = None,
     app_name: str | None = None,
     session_name: str | None = None,
 ) -> bool:
-    """Bring terminal app to foreground and switch to pane.
+    """Bring terminal app to the foreground (OS-level only).
+
+    Tmux pane navigation is intentionally not performed here — the CLI's
+    auto-hop path handles pane focus independently so both can trigger on
+    the same event without either one masking the other.
 
     Args:
-        pane_context: Optional context for tmux pane navigation.
         app_name: Pre-resolved terminal app name, resolved via _get_terminal_app
             when omitted.
         session_name: Pre-resolved tmux session name, resolved via
@@ -285,24 +287,23 @@ def focus_terminal(
     if handler_class:
         if session_name is None:
             session_name = _get_tmux_session_name()
-        return handler_class().focus(app_name, session_name, pane_context)
+        return handler_class().focus(app_name, session_name)
     return False
 
 
-def handle_state_notifications(state: str, project: str, pane_context: PaneContext | None = None) -> bool:
-    """Handle all notification actions for a state change.
+def handle_state_notifications(state: str, project: str, pane_context: PaneContext | None = None) -> None:
+    """Handle OS notification and terminal focus for a state change.
 
-    Returns True when the focus path either moved focus or was correctly
-    suppressed because the terminal was already focused, so the caller can
-    skip redundant fallbacks like auto-hop. Returns False when no focus was
-    configured or when focus_terminal failed — callers may then run a
-    fallback switch.
+    Focus and notification are independent of the CLI's auto-hop path.
+    The caller should invoke `do_auto_hop` separately — tmux pane hopping
+    must happen whether or not the terminal app is already in front, so
+    this function no longer communicates a skip signal back to the caller.
     """
     wants_focus = should_focus_app(state)
     wants_notify = should_notify(state)
 
     if not wants_focus and not wants_notify:
-        return False
+        return
 
     # Resolve terminal identity once; the probe and the focus path both need it
     # and each resolution issues a tmux subprocess.
@@ -313,14 +314,11 @@ def handle_state_notifications(state: str, project: str, pane_context: PaneConte
     # already looking at the terminal.
     already_focused = is_terminal_focused(app_name, session_name)
 
-    focus_handled = False
     if wants_focus:
         if already_focused:
             log_info(f"focus suppressed: terminal already focused ({state})")
-            focus_handled = True
-        elif focus_terminal(pane_context, app_name, session_name):
+        elif focus_terminal(app_name, session_name):
             log_info(f"terminal focused: {state}")
-            focus_handled = True
         else:
             log_debug(f"terminal focus failed (silent): {state}")
 
@@ -335,5 +333,3 @@ def handle_state_notifications(state: str, project: str, pane_context: PaneConte
                 log_info(f"notification sent: {state}")
             else:
                 log_debug(f"notification failed (silent): {state}")
-
-    return focus_handled

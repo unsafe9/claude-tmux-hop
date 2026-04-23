@@ -5,7 +5,7 @@ from __future__ import annotations
 import html
 import subprocess
 
-from .base import SUBPROCESS_TIMEOUT_LONG, PaneContext, switch_tmux_pane
+from .base import SUBPROCESS_TIMEOUT_LONG, PaneContext
 
 
 class WindowsNotifier:
@@ -69,16 +69,19 @@ $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
 
 
 class WindowsFocusHandler:
-    """Focus terminal windows on Windows using PowerShell COM automation."""
+    """Focus terminal windows on Windows using PowerShell COM automation.
 
-    def focus(self, app_name: str, session_name: str | None = None,
-              pane_context: PaneContext | None = None) -> bool:
+    Only handles OS-level window focus. Tmux pane navigation is handled
+    separately by the auto-hop path so both can run independently on the
+    same event.
+    """
+
+    def focus(self, app_name: str, session_name: str | None = None) -> bool:
         """Bring an application to the foreground on Windows.
 
         Args:
             app_name: Name of the application (window title or process name)
             session_name: Optional tmux session name (unused on Windows)
-            pane_context: Optional pane context for tmux navigation
 
         Returns:
             True if focus was successful
@@ -90,14 +93,7 @@ class WindowsFocusHandler:
             COM automation. If focus fails, the user may need to manually switch
             to the terminal window.
         """
-        # First: focus the window
-        focused = self._focus_window(app_name)
-
-        # Then: switch tmux pane if context provided
-        if focused and pane_context:
-            switch_tmux_pane(pane_context)
-
-        return focused
+        return self._focus_window(app_name)
 
     def _focus_window(self, app_name: str) -> bool:
         """Bring application window to foreground using COM automation."""
