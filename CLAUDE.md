@@ -9,10 +9,11 @@ A tool for navigating between multiple Claude Code sessions in tmux panes with p
 ## Deployment
 
 - I'll create a github release with `version-bump` command
-- Version bump rules (bump only when the corresponding surface actually changed):
-  - `pyproject.toml`: bump only when Python script under `src/claude_tmux_hop/` changes
-  - `.claude-plugin/plugin.json`: bump only when plugin-related files change (`hooks/`, `plugin.json` itself) — do **not** bump just because `marketplace.json` changed
-  - `.claude-plugin/marketplace.json`: bump only when the marketplace config itself changes
+- Version bump rules:
+  - `pyproject.toml`: bump when Python source under `src/claude_tmux_hop/` changes.
+  - `.claude-plugin/plugin.json`: bump when Python source OR plugin files (`hooks/`, `plugin.json` itself) change. The plugin ships and executes the Python code via `bin/claude-tmux-hop`, so Python changes always change plugin behavior.
+  - `.claude-plugin/marketplace.json` (`plugins[*].version`): always mirror `plugin.json`. Bump whenever `plugin.json` bumps. Pure marketplace-metadata edits (description/owner) do not require a bump.
+  - Consequence: Python changes bump all three; plugin-only changes bump `plugin.json` + `marketplace.json`; marketplace-metadata-only changes bump nothing.
 
 ## Project Structure
 

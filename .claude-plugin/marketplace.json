@@ -11,7 +11,7 @@
       "name": "claude-tmux-hop",
       "source": "./",
       "description": "Track Claude Code sessions in tmux for quick navigation",
-      "version": "0.3.3",
+      "version": "0.3.5",
       "author": {
         "name": "unsafe9"
       }
