@@ -95,13 +95,23 @@ def is_in_tmux() -> bool:
     return "TMUX" in os.environ
 
 
-def get_current_session_window() -> tuple[str, int | None]:
-    """Get the current tmux session name and window index.
+def get_current_session_window(pane_id: str | None = None) -> tuple[str, int | None]:
+    """Get a tmux session name and window index.
+
+    Args:
+        pane_id: Optional pane ID to query. When omitted, tmux uses the current
+            command context.
 
     Returns:
         Tuple of (session_name, window_index). Window may be None if parsing fails.
     """
-    current_info = run_tmux("display-message", "-p", "#{session_name}\t#{window_index}")
+    target = ["-t", pane_id] if pane_id else []
+    current_info = run_tmux(
+        "display-message",
+        *target,
+        "-p",
+        "#{session_name}\t#{window_index}",
+    )
     parts = current_info.split("\t", maxsplit=1)
     session = parts[0] if parts else ""
     try:

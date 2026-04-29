@@ -210,7 +210,7 @@ def _build_pane_context(project: str) -> PaneContext | None:
 
     # Get session and window from tmux
     try:
-        session, window = get_current_session_window()
+        session, window = get_current_session_window(pane_id)
         if not session:
             return None
 

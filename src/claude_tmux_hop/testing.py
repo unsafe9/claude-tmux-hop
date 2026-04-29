@@ -383,6 +383,43 @@ def test_macos_focus_behaviors() -> list[TestResult]:
     return results
 
 
+def test_pane_context_resolution() -> list[TestResult]:
+    """Test hook pane context resolution (unit test, no tmux required)."""
+    from . import cli
+
+    results = []
+    original_environ = dict(cli.os.environ)
+    original_get_current_session_window = cli.get_current_session_window
+
+    def fake_get_current_session_window(pane_id: str | None = None) -> tuple[str, int]:
+        if pane_id == "%target":
+            return "target-session", 7
+        return "active-session", 3
+
+    try:
+        cli.os.environ.clear()
+        cli.os.environ.update({"TMUX_PANE": "%target"})
+        cli.get_current_session_window = fake_get_current_session_window
+
+        context = cli._build_pane_context("project")
+        results.append(
+            TestResult(
+                "pane_context_uses_tmux_pane_target",
+                context is not None
+                and context.pane_id == "%target"
+                and context.session == "target-session"
+                and context.window == 7,
+                f"Expected %target in target-session:7, got {context}",
+            )
+        )
+    finally:
+        cli.get_current_session_window = original_get_current_session_window
+        cli.os.environ.clear()
+        cli.os.environ.update(original_environ)
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -391,6 +428,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_dialog_detection())
     all_results.extend(test_terminal_detection())
     all_results.extend(test_macos_focus_behaviors())
+    all_results.extend(test_pane_context_resolution())
     all_results.extend(validate_hooks_json())
 
     passed = sum(1 for r in all_results if r.passed)
