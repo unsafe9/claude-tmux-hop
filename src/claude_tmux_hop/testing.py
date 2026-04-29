@@ -273,12 +273,124 @@ def test_dialog_detection() -> list[TestResult]:
     return results
 
 
+def test_terminal_detection() -> list[TestResult]:
+    """Test terminal app detection helpers (unit test, no tmux required)."""
+    from . import notify
+
+    results = []
+
+    original_get_global_option = notify.get_global_option
+    original_environ = dict(notify.os.environ)
+
+    try:
+        notify.get_global_option = lambda _name, default="": default
+        notify.os.environ.clear()
+        notify.os.environ.update({"TERM_PROGRAM": "ghostty"})
+
+        app = notify._get_terminal_app()
+        results.append(
+            TestResult(
+                "terminal_detection_ghostty_lowercase",
+                app == "Ghostty",
+                f"Expected Ghostty, got {app}",
+            )
+        )
+
+        notify.os.environ.update(
+            {
+                "__CFBundleIdentifier": "com.apple.Terminal",
+                "TERM_PROGRAM": "ghostty",
+            }
+        )
+
+        app = notify._get_terminal_app()
+        results.append(
+            TestResult(
+                "terminal_detection_ghostty_over_stale_terminal_bundle",
+                app == "Ghostty",
+                f"Expected Ghostty, got {app}",
+            )
+        )
+    finally:
+        notify.get_global_option = original_get_global_option
+        notify.os.environ.clear()
+        notify.os.environ.update(original_environ)
+
+    return results
+
+
+def test_macos_focus_behaviors() -> list[TestResult]:
+    """Test macOS focus scripts (unit test, no osascript required)."""
+    from .notify import macos
+
+    results = []
+    scripts: list[str] = []
+    original_run_osascript = macos._run_osascript
+    original_run_osascript_output = macos._run_osascript_output
+
+    def fake_run_osascript(script: str) -> bool:
+        scripts.append(script)
+        return True
+
+    def fake_run_osascript_output(script: str) -> str:
+        scripts.append(script)
+        return "true"
+
+    try:
+        macos._run_osascript = fake_run_osascript
+        macos._run_osascript_output = fake_run_osascript_output
+        focused = macos.MacOSFocusHandler().focus("Ghostty", "claude-session")
+        script = scripts[-1] if scripts else ""
+
+        results.append(
+            TestResult(
+                "macos_focus_ghostty_uses_process_focus",
+                focused and 'application process "ghostty"' in script,
+                "Ghostty focus uses System Events process focus",
+            )
+        )
+        results.append(
+            TestResult(
+                "macos_focus_ghostty_does_not_activate_app",
+                'tell application "Ghostty" to activate' not in script,
+                "Ghostty focus avoids app activate",
+            )
+        )
+
+        scripts.clear()
+
+        def fake_failed_osascript_output(script: str) -> str:
+            scripts.append(script)
+            return "false"
+
+        macos._run_osascript_output = fake_failed_osascript_output
+        focused = macos.MacOSFocusHandler().focus("Ghostty", "claude-session")
+        avoided_activate = all(
+            'tell application "Ghostty" to activate' not in s for s in scripts
+        )
+
+        results.append(
+            TestResult(
+                "macos_focus_ghostty_failure_does_not_launch_app",
+                not focused and avoided_activate,
+                "Ghostty focus failure does not fall back to app activate",
+            )
+        )
+    finally:
+        macos._run_osascript = original_run_osascript
+        macos._run_osascript_output = original_run_osascript_output
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
     all_results.extend(test_state_transitions())
     all_results.extend(test_priority_sorting())
     all_results.extend(test_dialog_detection())
+    all_results.extend(test_terminal_detection())
+    all_results.extend(test_macos_focus_behaviors())
     all_results.extend(validate_hooks_json())
 
     passed = sum(1 for r in all_results if r.passed)

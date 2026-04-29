@@ -15,6 +15,7 @@ TERMINAL_APP_MAP = {
     "WezTerm": "WezTerm",
     "Hyper": "Hyper",
     "Ghostty": "Ghostty",
+    "ghostty": "Ghostty",
     # IDEs - VS Code family
     "vscode": "Visual Studio Code",
     "cursor": "Cursor",

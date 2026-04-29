@@ -10,6 +10,11 @@ import subprocess
 from .base import SUBPROCESS_TIMEOUT, PaneContext, run_command
 
 
+MACOS_PROCESS_NAMES = {
+    "Ghostty": "ghostty",
+}
+
+
 def _escape_applescript_string(s: str) -> str:
     """Escape a string for use inside AppleScript double quotes.
 
@@ -147,6 +152,21 @@ end tell
     return _run_osascript(script)
 
 
+def _focus_running_app_process(process_name: str) -> bool:
+    """Focus an already-running macOS app process without launching it."""
+    process_escaped = _escape_applescript_string(process_name)
+    script = f'''
+tell application "System Events"
+    if exists application process "{process_escaped}" then
+        set frontmost of application process "{process_escaped}" to true
+        return true
+    end if
+    return false
+end tell
+'''
+    return _run_osascript_output(script) == "true"
+
+
 class MacOSNotifier:
     """macOS notification sender using osascript or terminal-notifier.
 
@@ -226,10 +246,11 @@ class MacOSNotifier:
 class MacOSFocusHandler:
     """macOS focus handler using AppleScript.
 
-    Supports tab-specific focusing for iTerm2 and Terminal.app,
-    with fallback to simple app activation for other apps. Tmux pane
-    navigation is intentionally not handled here — the auto-hop path
-    runs independently so a single event can trigger both an app focus
+    Supports tab-specific focusing for iTerm2 and Terminal.app. Some
+    terminals, like Ghostty, use a different process name than app name and
+    should be focused through System Events to avoid launching a new window.
+    Tmux pane navigation is intentionally not handled here — the auto-hop
+    path runs independently so a single event can trigger both an app focus
     and a pane hop without coupling.
     """
 
@@ -272,6 +293,10 @@ class MacOSFocusHandler:
         if app_name == "Terminal" and session_name:
             if _focus_terminal_window(session_name):
                 return True
+
+        process_name = MACOS_PROCESS_NAMES.get(app_name)
+        if process_name:
+            return _focus_running_app_process(process_name)
 
         # Fallback: Just activate the app
         app_escaped = _escape_applescript_string(app_name)

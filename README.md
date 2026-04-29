@@ -91,11 +91,13 @@ set -g @hop-notify 'waiting'         # Notify when a pane needs input
 # Disabled by default. Set to comma-separated states to enable.
 set -g @hop-focus-app 'waiting'      # Focus terminal when a pane needs input
 
-# Terminal app override (auto-detected from TERM_PROGRAM by default)
+# Terminal app override (auto-detected from macOS bundle ID / TERM_PROGRAM by default)
 # set -g @hop-terminal-app 'iTerm'   # Explicitly set terminal app name
+# set -g @hop-terminal-app 'Ghostty' # Use this if tmux still detects Terminal.app
 
-# Note: On macOS, iTerm2 and Terminal.app will focus the specific tab/window
-# containing the tmux session, not just bring the app to foreground.
+# Note: On macOS, iTerm2 and Terminal.app focus the specific tab/window
+# containing the tmux session. Ghostty focuses the running app process without
+# launching a new blank window.
 
 # Status bar integration - show pane counts in status bar
 set -g status-right '#{E:@hop-status} | %H:%M'
@@ -206,7 +208,7 @@ Without `terminal-notifier`, notifications still work - you just can't click the
 #### macOS (Full Support)
 - **Notifications**: Native via AppleScript `display notification`
 - **Focus Detection**: AppleScript queries frontmost app and iTerm2/Terminal.app tabs
-- **App Focus**: AppleScript `activate` command
+- **App Focus**: AppleScript `activate` command, with System Events process focus for Ghostty
 - **Tab Focus**: AppleScript searches iTerm2 sessions / Terminal.app windows by tmux session name
 - **Click-to-Focus**: Optional via `terminal-notifier`
 
@@ -250,7 +252,10 @@ The terminal app is auto-detected from environment variables:
 | 1 | `@hop-terminal-app` option | User override |
 | 2 | `__CFBundleIdentifier` (macOS) | `com.googlecode.iterm2` → iTerm |
 | 3 | `WT_SESSION` (Windows) | Windows Terminal |
-| 4 | `TERM_PROGRAM` | `vscode`, `Alacritty`, etc. |
+| 4 | `TERM_PROGRAM` | `vscode`, `Alacritty`, `ghostty`, etc. |
+
+If macOS reports a Terminal.app bundle ID but `TERM_PROGRAM=ghostty`, Ghostty
+is preferred to handle tmux sessions that were moved from Terminal.app.
 
 Supported terminals include:
 - **macOS**: Terminal.app, iTerm2, Alacritty, kitty, WezTerm, Ghostty, Hyper

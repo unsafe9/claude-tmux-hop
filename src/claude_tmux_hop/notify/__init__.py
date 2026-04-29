@@ -101,16 +101,31 @@ def _get_terminal_app() -> str | None:
     if configured:
         return configured
 
-    # On macOS, prefer __CFBundleIdentifier (works inside tmux)
+    term_program = os.environ.get("TERM_PROGRAM", "")
+    term_program_app = None
+    if term_program and term_program != "tmux":
+        term_program_app = TERMINAL_APP_MAP.get(term_program)
+
+    # On macOS, __CFBundleIdentifier usually works inside tmux. If TERM_PROGRAM
+    # points to another known terminal, prefer it because tmux can keep a stale
+    # bundle ID after the user switches terminal apps.
     bundle_id = os.environ.get("__CFBundleIdentifier", "")
     if bundle_id:
+        bundle_app = None
         # Check exact match first
         if bundle_id in MACOS_BUNDLE_MAP:
-            return MACOS_BUNDLE_MAP[bundle_id]
+            bundle_app = MACOS_BUNDLE_MAP[bundle_id]
         # Check partial match (e.g., com.jetbrains.goland.EAP)
-        for prefix, app_name in MACOS_BUNDLE_MAP.items():
-            if bundle_id.startswith(prefix):
-                return app_name
+        if bundle_app is None:
+            for prefix, app_name in MACOS_BUNDLE_MAP.items():
+                if bundle_id.startswith(prefix):
+                    bundle_app = app_name
+                    break
+
+        if bundle_app:
+            if term_program_app and term_program_app != bundle_app:
+                return term_program_app
+            return bundle_app
 
     # Windows Terminal detection via WT_SESSION env var
     if os.environ.get("WT_SESSION"):
@@ -126,10 +141,9 @@ def _get_terminal_app() -> str | None:
         return None
 
     # Check TERM_PROGRAM (useful on Linux or when bundle ID not available)
-    term_program = os.environ.get("TERM_PROGRAM", "")
     if term_program and term_program != "tmux":
-        if term_program in TERMINAL_APP_MAP:
-            return TERMINAL_APP_MAP[term_program]
+        if term_program_app:
+            return term_program_app
 
     # JetBrains detection via TERM_PROGRAM containing JediTerm
     if term_program and "JediTerm" in term_program:
