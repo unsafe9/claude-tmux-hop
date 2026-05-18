@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -12,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import inbox
-from .log import log_cli_call, log_error, log_info
+from .log import log_cli_call, log_debug, log_error, log_info
 from .notify import PaneContext, handle_state_notifications
 from .parser import create_parser
 from .priority import STATE_PRIORITY, group_by_state, sort_all_panes
@@ -29,6 +30,7 @@ from .tmux import (
     parse_state_set,
     run_tmux,
     set_pane_state,
+    set_pane_task,
     switch_to_pane,
     validate_waiting_panes,
 )
@@ -74,6 +76,20 @@ STATE_ICONS = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}
 # Default status format string
 DEFAULT_STATUS_FORMAT = "{waiting:󰂜} {idle:󰄬}"
 
+# Task summary length limits
+MAX_TASK_STORED = 200  # Maximum stored in @hop-task tmux option / inbox jsonl
+MAX_TASK_DISPLAY = 50  # Maximum shown in picker / list / hop-status
+
+# How many bytes of the transcript tail to scan for the latest ai-title.
+# Claude Code regenerates ai-title each user turn; the most recent one is
+# always within the last few KB even on very long sessions. 64KB gives a
+# generous safety margin while keeping the read cheap on every hook call.
+TRANSCRIPT_TAIL_BYTES = 65536
+
+# Leading code-fence / blockquote markers stripped when normalizing a task.
+_TASK_PREFIX_RE = re.compile(r"^(```\S*|>+)\s*")
+_TASK_WHITESPACE_RE = re.compile(r"\s+")
+
 
 def _format_time_ago(timestamp: int) -> str:
     """Format a Unix timestamp as a human-readable time ago string.
@@ -107,6 +123,111 @@ def _format_time_ago(timestamp: int) -> str:
     else:
         weeks = diff // SECONDS_PER_WEEK
         return f"{weeks}w"
+
+
+def _normalize_task(text: str) -> str:
+    """Take the first substantive line, sanitize, and truncate to stored length.
+
+    Lines that become empty after stripping code-fence / blockquote markers are
+    skipped so prompts that open with a bare ``` fence fall through to the
+    actual content. tmux option values cannot contain newlines, so all
+    whitespace collapses to single spaces. The truncated form ends with an
+    ellipsis when cut.
+    """
+    if not text:
+        return ""
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        line = _TASK_PREFIX_RE.sub("", line)
+        line = _TASK_WHITESPACE_RE.sub(" ", line).strip()
+        if not line:
+            continue
+        if len(line) > MAX_TASK_STORED:
+            line = line[: MAX_TASK_STORED - 1] + "…"
+        return line
+    return ""
+
+
+def _format_task_display(task: str, max_len: int = MAX_TASK_DISPLAY) -> str:
+    """Truncate task for display in picker / list / hop-status output."""
+    if not task:
+        return ""
+    if len(task) > max_len:
+        return task[: max_len - 1] + "…"
+    return task
+
+
+def _read_hook_stdin() -> dict | None:
+    """Read hook payload JSON from stdin when stdin is piped.
+
+    Claude Code pipes a JSON object to every hook command. When the binary is
+    invoked manually (interactive shell), stdin is a tty and we skip reading.
+    Returns None on any parse failure so callers can degrade gracefully.
+    """
+    try:
+        if sys.stdin.isatty():
+            return None
+    except (ValueError, OSError):
+        return None
+    try:
+        raw = sys.stdin.read()
+    except (ValueError, OSError):
+        return None
+    if not raw or not raw.strip():
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        log_debug("hook stdin: not valid JSON, ignoring")
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _extract_task_from_transcript(path: str) -> str:
+    """Read a Claude Code transcript jsonl tail and return the latest task summary.
+
+    Priority:
+      1. Most recent ``type == "ai-title"`` entry's ``aiTitle`` field
+      2. Most recent ``type == "last-prompt"`` entry's ``lastPrompt`` field
+      3. ""
+
+    Reads only the tail of the file to keep this cheap on long sessions.
+    """
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - TRANSCRIPT_TAIL_BYTES))
+            tail = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+    lines = tail.splitlines()
+    if size > TRANSCRIPT_TAIL_BYTES and lines:
+        # Tail likely started mid-line; the first chunk may be a partial JSON record.
+        lines = lines[1:]
+
+    last_prompt = ""
+    for line in reversed(lines):
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        t = d.get("type")
+        if t == "ai-title":
+            ai_title = d.get("aiTitle", "") or ""
+            if ai_title:
+                return _normalize_task(ai_title)
+        elif t == "last-prompt" and not last_prompt:
+            last_prompt = d.get("lastPrompt", "") or ""
+
+    if last_prompt:
+        return _normalize_task(last_prompt)
+    return ""
 
 
 def should_auto_hop(new_state: str) -> bool:
@@ -231,6 +352,16 @@ def cmd_register(args: argparse.Namespace) -> int:
     set_pane_state(args.state)
     log_info(f"register: state set to {args.state}")
 
+    # Refresh the per-pane task summary. Manual --task wins over the hook
+    # payload so callers can override the auto-derived value when testing.
+    task = _resolve_task_for_register(args)
+    if task:
+        try:
+            set_pane_task(task)
+            log_info(f"register: task set ({len(task)} chars)")
+        except RuntimeError as e:
+            log_debug(f"register: set_pane_task failed: {e}")
+
     # Get project name for notifications
     project = os.path.basename(os.getcwd())
 
@@ -245,6 +376,7 @@ def cmd_register(args: argparse.Namespace) -> int:
             pane_id=pane_context.pane_id,
             session=pane_context.session,
             window=pane_context.window,
+            task=task,
         )
 
     # Focus and auto-hop are independent: app focus is an OS-level action,
@@ -257,6 +389,24 @@ def cmd_register(args: argparse.Namespace) -> int:
         do_auto_hop(pane_context)
 
     return 0
+
+
+def _resolve_task_for_register(args: argparse.Namespace) -> str:
+    """Pick the task summary to store for this register call.
+
+    Order: explicit --task arg > transcript ai-title/last-prompt from hook stdin > "".
+    """
+    override = getattr(args, "task", None)
+    if override:
+        return _normalize_task(override)
+
+    payload = _read_hook_stdin()
+    if not payload:
+        return ""
+    transcript_path = payload.get("transcript_path")
+    if not transcript_path:
+        return ""
+    return _extract_task_from_transcript(transcript_path)
 
 
 @requires_tmux(silent=True)
@@ -374,6 +524,9 @@ def cmd_picker_data(args: argparse.Namespace) -> int:
         # Output: display_label<TAB>pane_id
         # fzf will show the label but we extract pane_id on selection
         label = f"{icon} {pane.project} ({pane.session}:{pane.window}) [{time_ago}]"
+        task = _format_task_display(pane.task)
+        if task:
+            label = f"{label}  {task}"
         print(f"{label}\t{pane.id}")
 
     return 0
@@ -404,7 +557,11 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     for pane in sorted_panes:
         ts = datetime.fromtimestamp(pane.timestamp).strftime("%H:%M:%S") if pane.timestamp else "——:——:——"
-        print(f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {pane.project}")
+        line = f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {pane.project}"
+        task = _format_task_display(pane.task)
+        if task:
+            line = f"{line}  — {task}"
+        print(line)
 
     return 0
 
@@ -543,6 +700,9 @@ def cmd_inbox(args: argparse.Namespace) -> int:
         icon = STATE_ICONS.get(entry.state, "?")
         time_ago = _format_time_ago(entry.timestamp)
         label = f"{icon} {entry.project}  {time_ago}"
+        task = _format_task_display(entry.task)
+        if task:
+            label = f"{label}  {task}"
         print(f"{label}\t{entry.pane_id}")
 
     return 0

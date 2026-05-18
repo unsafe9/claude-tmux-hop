@@ -65,6 +65,11 @@ def create_parser(
         choices=VALID_STATES,
         help="State to register",
     )
+    register_parser.add_argument(
+        "--task",
+        "-t",
+        help="Manual task summary override (skips transcript-based auto-derivation)",
+    )
     register_parser.set_defaults(func=cmd_register)
 
     # clear command

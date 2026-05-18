@@ -16,24 +16,24 @@ Do **not** trigger for general tmux pane listing, for switching panes (the plugi
 ## How to run
 
 1. Confirm you are inside a tmux session. If `$TMUX` is unset, tell the user the skill only works inside tmux and stop.
-2. Run `claude-tmux-hop list` via Bash. Output is one pane per line, whitespace-separated columns (`state` is padded to 8 chars, `pane_id` to 6, so split on runs of whitespace):
+2. Run `claude-tmux-hop list` via Bash. Output is one pane per line, whitespace-separated columns (`state` is padded to 8 chars, `pane_id` to 6, so split on runs of whitespace). The final `— <task>` segment is optional and only appears when a task summary is available:
    ```
-   <state>   <HH:MM:SS>  %<paneId>  <session>:<window>  <project>
+   <state>   <HH:MM:SS>  %<paneId>  <session>:<window>  <project>  — <task>
    ```
-   `<state>` is one of `waiting`, `idle`, `active`. The pane id always starts with `%` (tmux pane-id form). The timestamp is when the state was last set; if it shows `——:——:——`, the pane has no recorded state-change time — say "unknown" instead of trying to compute "ago". If output is `No Claude Code sessions found`, report that and stop.
+   `<state>` is one of `waiting`, `idle`, `active`. The pane id always starts with `%` (tmux pane-id form). The timestamp is when the state was last set; if it shows `——:——:——`, the pane has no recorded state-change time — say "unknown" instead of trying to compute "ago". `<task>` is a Claude-Code-generated one-line summary of what that session is currently working on (sourced from `ai-title` in the session transcript). It may be missing on freshly-started sessions or panes registered before this feature shipped — in that case just omit it from the summary. If output is `No Claude Code sessions found`, report that and stop.
 3. Group rows by state in this priority order — **waiting → idle → active** — and within each group keep the order returned by the command (already sorted newest first).
 4. Present a compact summary. Suggested format:
 
    ```
    waiting (N)
-     - <project> · <session>:<window> · <pane> · <time-ago>
+     - <project> · <session>:<window> · <pane> · <time-ago> — <task>
    idle (N)
      - …
    active (N)
      - …
    ```
 
-   Convert the `HH:MM:SS` timestamp to a relative "N분 전" / "N min ago" using the user's language. Omit any group with zero entries.
+   Convert the `HH:MM:SS` timestamp to a relative "N분 전" / "N min ago" using the user's language. Append `— <task>` only when the row has one; otherwise omit. Omit any state group with zero entries.
 5. If `waiting` panes exist, mention them first explicitly — those block the user. If none, say so plainly.
 
 ## Notes

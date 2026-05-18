@@ -30,6 +30,7 @@ class PaneInfo:
     cwd: str  # Current working directory
     session: str  # Session name
     window: int  # Window index
+    task: str = ""  # One-line task summary (from Claude Code ai-title)
 
     @property
     def project(self) -> str:
@@ -157,6 +158,20 @@ def set_pane_state(state: str, pane_id: str | None = None) -> None:
     run_tmux("set-option", "-p", *target, "@hop-timestamp", timestamp)
 
 
+def set_pane_task(task: str, pane_id: str | None = None) -> None:
+    """Set the task summary for a pane.
+
+    Args:
+        task: One-line task summary. Empty string unsets the option.
+        pane_id: The pane ID, or None for current pane
+    """
+    target = _pane_target_args(pane_id)
+    if task:
+        run_tmux("set-option", "-p", *target, "@hop-task", task)
+    else:
+        run_tmux("set-option", "-p", *target, "-u", "@hop-task", check=False)
+
+
 def has_hop_state(pane_id: str | None = None) -> bool:
     """Check if a pane has hop state set.
 
@@ -180,6 +195,7 @@ def clear_pane_state(pane_id: str | None = None) -> None:
     target = _pane_target_args(pane_id)
     run_tmux("set-option", "-p", *target, "-u", "@hop-state", check=False)
     run_tmux("set-option", "-p", *target, "-u", "@hop-timestamp", check=False)
+    run_tmux("set-option", "-p", *target, "-u", "@hop-task", check=False)
 
 
 def get_global_option(name: str, default: str = "") -> str:
@@ -312,12 +328,12 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
     running_pane_ids = get_running_claude_pane_ids() if validate else None
 
     # Query all panes with hop options
-    # Format: pane_id \t state \t timestamp \t cwd \t session \t window
+    # Format: pane_id \t state \t timestamp \t cwd \t session \t window \t task
     output = run_tmux(
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}\t#{@hop-state}\t#{@hop-timestamp}\t#{pane_current_path}\t#{session_name}\t#{window_index}",
+        "#{pane_id}\t#{@hop-state}\t#{@hop-timestamp}\t#{pane_current_path}\t#{session_name}\t#{window_index}\t#{@hop-task}",
     )
 
     panes = []
@@ -325,11 +341,12 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
         if not line:
             continue
 
-        parts = line.split("\t", maxsplit=5)
+        parts = line.split("\t", maxsplit=6)
         if len(parts) < 6:
             continue
 
-        pane_id, state, timestamp_str, cwd, session, window_str = parts
+        pane_id, state, timestamp_str, cwd, session, window_str = parts[:6]
+        task = parts[6] if len(parts) >= 7 else ""
 
         # Only include panes with hop state
         if not state:
@@ -354,6 +371,7 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
                 cwd=cwd,
                 session=session,
                 window=window,
+                task=task,
             )
         )
 
@@ -552,5 +570,6 @@ def validate_waiting_panes(panes: list[PaneInfo]) -> None:
             pane_id=pane.id,
             session=pane.session,
             window=pane.window,
+            task=pane.task,
         )
         log_info(f"validate: {pane.id} flipped waiting → idle (dialog dismissed)")

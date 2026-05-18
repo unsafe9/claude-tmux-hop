@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -563,6 +564,210 @@ def test_pane_context_resolution() -> list[TestResult]:
     return results
 
 
+def test_normalize_task() -> list[TestResult]:
+    """Test task normalization helper (unit test, no tmux required)."""
+    from .cli import MAX_TASK_STORED, _normalize_task
+
+    results = []
+
+    cases = [
+        ("", "", "empty input returns empty"),
+        ("   ", "", "whitespace-only returns empty"),
+        ("hello world", "hello world", "simple text passes through"),
+        ("line one\nline two", "line one", "multiline returns first non-empty line"),
+        ("\n\nfirst real line\nignored", "first real line", "skips leading blank lines"),
+        ("```python\ncode\n```", "code", "code-fence prefix stripped (next line is the content)"),
+        ("```\nbare", "bare", "bare code fence on first line falls through to next"),
+        ("> quoted text", "quoted text", "blockquote prefix stripped"),
+        ("a\tb  c", "a b c", "tabs and multi-spaces collapsed"),
+    ]
+
+    for raw, expected, desc in cases:
+        actual = _normalize_task(raw)
+        results.append(
+            TestResult(
+                f"normalize_task__{desc[:32]}",
+                actual == expected,
+                f"{desc}: got {actual!r}, expected {expected!r}",
+            )
+        )
+
+    long_input = "x" * (MAX_TASK_STORED + 50)
+    truncated = _normalize_task(long_input)
+    results.append(
+        TestResult(
+            "normalize_task__truncates_to_max_stored",
+            len(truncated) == MAX_TASK_STORED and truncated.endswith("…"),
+            f"Expected length {MAX_TASK_STORED} with ellipsis, got len={len(truncated)} suffix={truncated[-2:]!r}",
+        )
+    )
+
+    return results
+
+
+def test_extract_task_from_transcript() -> list[TestResult]:
+    """Test transcript jsonl parsing for task extraction."""
+    from .cli import _extract_task_from_transcript
+
+    results = []
+
+    def write_jsonl(lines: list[dict | str]) -> Path:
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+        )
+        for line in lines:
+            if isinstance(line, dict):
+                f.write(json.dumps(line) + "\n")
+            else:
+                f.write(line + "\n")
+        f.close()
+        return Path(f.name)
+
+    # Case 1: ai-title present → use it
+    p = write_jsonl([
+        {"type": "user", "message": {"content": "hi"}},
+        {"type": "ai-title", "aiTitle": "Refactor auth module"},
+        {"type": "last-prompt", "lastPrompt": "hi"},
+    ])
+    try:
+        actual = _extract_task_from_transcript(str(p))
+        results.append(TestResult(
+            "extract_task__ai_title_present",
+            actual == "Refactor auth module",
+            f"Expected 'Refactor auth module', got {actual!r}",
+        ))
+    finally:
+        p.unlink(missing_ok=True)
+
+    # Case 2: only last-prompt → fallback
+    p = write_jsonl([
+        {"type": "user", "message": {"content": "hi"}},
+        {"type": "last-prompt", "lastPrompt": "Investigate cache stampede"},
+    ])
+    try:
+        actual = _extract_task_from_transcript(str(p))
+        results.append(TestResult(
+            "extract_task__fallback_to_last_prompt",
+            actual == "Investigate cache stampede",
+            f"Expected 'Investigate cache stampede', got {actual!r}",
+        ))
+    finally:
+        p.unlink(missing_ok=True)
+
+    # Case 3: neither → empty
+    p = write_jsonl([
+        {"type": "user", "message": {"content": "hi"}},
+        {"type": "assistant", "message": {"content": "ok"}},
+    ])
+    try:
+        actual = _extract_task_from_transcript(str(p))
+        results.append(TestResult(
+            "extract_task__no_signal_returns_empty",
+            actual == "",
+            f"Expected '', got {actual!r}",
+        ))
+    finally:
+        p.unlink(missing_ok=True)
+
+    # Case 4: ai-title appears twice → most recent wins
+    p = write_jsonl([
+        {"type": "ai-title", "aiTitle": "Old topic"},
+        {"type": "user", "message": {"content": "..."}},
+        {"type": "ai-title", "aiTitle": "New topic"},
+    ])
+    try:
+        actual = _extract_task_from_transcript(str(p))
+        results.append(TestResult(
+            "extract_task__most_recent_ai_title_wins",
+            actual == "New topic",
+            f"Expected 'New topic', got {actual!r}",
+        ))
+    finally:
+        p.unlink(missing_ok=True)
+
+    # Case 5: corrupt JSON lines are tolerated
+    p = write_jsonl([
+        "not-json garbage",
+        {"type": "ai-title", "aiTitle": "Survives garbage"},
+        "{half-json",
+    ])
+    try:
+        actual = _extract_task_from_transcript(str(p))
+        results.append(TestResult(
+            "extract_task__tolerates_corrupt_json",
+            actual == "Survives garbage",
+            f"Expected 'Survives garbage', got {actual!r}",
+        ))
+    finally:
+        p.unlink(missing_ok=True)
+
+    # Case 6: missing file → empty, no exception
+    actual = _extract_task_from_transcript("/nonexistent/path.jsonl")
+    results.append(TestResult(
+        "extract_task__missing_file_returns_empty",
+        actual == "",
+        f"Expected '', got {actual!r}",
+    ))
+
+    return results
+
+
+def test_inbox_entry_task_backcompat() -> list[TestResult]:
+    """Inbox entries written before the task field existed must still parse."""
+    from . import inbox
+
+    results = []
+
+    original_file = inbox.INBOX_FILE
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+    )
+    try:
+        # Legacy entry: no "task" key
+        tmp.write(json.dumps({
+            "ts": 1700000000,
+            "state": "waiting",
+            "project": "demo",
+            "pane_id": "%1",
+            "session": "main",
+            "window": 0,
+        }) + "\n")
+        # New-format entry: has "task"
+        tmp.write(json.dumps({
+            "ts": 1700000010,
+            "state": "idle",
+            "project": "demo",
+            "pane_id": "%2",
+            "session": "main",
+            "window": 0,
+            "task": "Some task",
+        }) + "\n")
+        tmp.close()
+
+        inbox.INBOX_FILE = Path(tmp.name)
+        entries = inbox.get_entries(limit=10)
+
+        by_pane = {e.pane_id: e for e in entries}
+        legacy = by_pane.get("%1")
+        modern = by_pane.get("%2")
+
+        results.append(TestResult(
+            "inbox_entry__legacy_has_empty_task",
+            legacy is not None and legacy.task == "",
+            f"Legacy entry should default task to '', got {legacy.task if legacy else 'MISSING'!r}",
+        ))
+        results.append(TestResult(
+            "inbox_entry__modern_carries_task",
+            modern is not None and modern.task == "Some task",
+            f"Modern entry should carry task, got {modern.task if modern else 'MISSING'!r}",
+        ))
+    finally:
+        inbox.INBOX_FILE = original_file
+        Path(tmp.name).unlink(missing_ok=True)
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -574,6 +779,9 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_terminal_detection_prefers_tmux_client())
     all_results.extend(test_macos_focus_behaviors())
     all_results.extend(test_pane_context_resolution())
+    all_results.extend(test_normalize_task())
+    all_results.extend(test_extract_task_from_transcript())
+    all_results.extend(test_inbox_entry_task_backcompat())
     all_results.extend(validate_hooks_json())
 
     passed = sum(1 for r in all_results if r.passed)
