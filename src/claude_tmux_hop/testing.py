@@ -383,6 +383,149 @@ def test_macos_focus_behaviors() -> list[TestResult]:
     return results
 
 
+def test_macos_terminal_app_from_process_tree() -> list[TestResult]:
+    """Test macOS terminal app detection from process executable paths."""
+    from .notify import macos
+
+    results = []
+
+    cases = [
+        (
+            "/Applications/Ghostty.app/Contents/MacOS/ghostty",
+            "Ghostty",
+            "extracts Ghostty from app bundle path",
+        ),
+        (
+            "/Applications/iTerm.app/Contents/MacOS/iTerm2",
+            "iTerm",
+            "extracts iTerm from app bundle path",
+        ),
+        (
+            "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+            "Terminal",
+            "extracts Terminal from app bundle path",
+        ),
+        ("/usr/bin/login", None, "non-terminal binary returns None"),
+        ("", None, "empty input returns None"),
+        ("ghostty", None, "bare basename without bundle returns None"),
+    ]
+
+    for path, expected, message in cases:
+        actual = macos._app_from_executable_path(path)
+        results.append(
+            TestResult(
+                f"macos_app_from_path__{expected or 'none'}__{path[:20]}",
+                actual == expected,
+                f"{message}: got {actual!r}, expected {expected!r}",
+            )
+        )
+
+    # Walk a synthetic process tree: tmux client -> shell -> login -> Ghostty
+    procs = {
+        "8947": ("53850", "tmux"),
+        "53850": ("53849", "-/bin/zsh"),
+        "53849": ("75257", "/usr/bin/login"),
+        "75257": ("1", "/Applications/Ghostty.app/Contents/MacOS/ghostty"),
+    }
+    walked = macos._walk_pid_to_terminal_app("8947", procs=procs)
+    results.append(
+        TestResult(
+            "macos_walk_finds_ghostty_ancestor",
+            walked == "Ghostty",
+            f"Expected Ghostty by walking ancestors, got {walked!r}",
+        )
+    )
+
+    # Walk terminates cleanly when no terminal app is found in ancestry
+    orphan_procs = {
+        "100": ("1", "tmux"),
+    }
+    walked = macos._walk_pid_to_terminal_app("100", procs=orphan_procs)
+    results.append(
+        TestResult(
+            "macos_walk_returns_none_without_terminal",
+            walked is None,
+            f"Expected None when no terminal ancestor, got {walked!r}",
+        )
+    )
+
+    # Walk handles a missing start pid gracefully
+    walked = macos._walk_pid_to_terminal_app("99999", procs=procs)
+    results.append(
+        TestResult(
+            "macos_walk_missing_pid_returns_none",
+            walked is None,
+            f"Expected None for missing pid, got {walked!r}",
+        )
+    )
+
+    return results
+
+
+def test_terminal_detection_prefers_tmux_client() -> list[TestResult]:
+    """`_get_terminal_app` must trust tmux client ancestry over stale env vars."""
+    from . import notify
+
+    results = []
+    original_get_global_option = notify.get_global_option
+    original_environ = dict(notify.os.environ)
+    original_detect = notify.detect_terminal_app_via_tmux_client
+
+    try:
+        notify.get_global_option = lambda _name, default="": default
+        notify.os.environ.clear()
+        # Simulate the real-world bug: tmux server inherited Terminal.app env,
+        # user is now attached from Ghostty.
+        notify.os.environ.update(
+            {
+                "TMUX": "/tmp/tmux/default,1,0",
+                "__CFBundleIdentifier": "com.apple.Terminal",
+                "TERM_PROGRAM": "tmux",
+            }
+        )
+        notify.detect_terminal_app_via_tmux_client = (
+            lambda session_name=None: "Ghostty"
+        )
+        # Force macOS platform branch
+        original_platform = notify.sys.platform
+        try:
+            notify.sys.platform = "darwin"
+            app = notify._get_terminal_app("some-session")
+        finally:
+            notify.sys.platform = original_platform
+
+        results.append(
+            TestResult(
+                "terminal_detection_prefers_tmux_client_over_stale_bundle",
+                app == "Ghostty",
+                f"Expected Ghostty from tmux client walk, got {app!r}",
+            )
+        )
+
+        # Fall through to env-var logic when tmux client detection returns None.
+        notify.detect_terminal_app_via_tmux_client = lambda session_name=None: None
+        try:
+            notify.sys.platform = "darwin"
+            app = notify._get_terminal_app("some-session")
+        finally:
+            notify.sys.platform = original_platform
+
+        results.append(
+            TestResult(
+                "terminal_detection_falls_back_when_tmux_client_unknown",
+                app == "Terminal",
+                f"Expected Terminal env-var fallback, got {app!r}",
+            )
+        )
+    finally:
+        notify.get_global_option = original_get_global_option
+        notify.detect_terminal_app_via_tmux_client = original_detect
+        notify.os.environ.clear()
+        notify.os.environ.update(original_environ)
+
+    return results
+
+
 def test_pane_context_resolution() -> list[TestResult]:
     """Test hook pane context resolution (unit test, no tmux required)."""
     from . import cli
@@ -427,6 +570,8 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_priority_sorting())
     all_results.extend(test_dialog_detection())
     all_results.extend(test_terminal_detection())
+    all_results.extend(test_macos_terminal_app_from_process_tree())
+    all_results.extend(test_terminal_detection_prefers_tmux_client())
     all_results.extend(test_macos_focus_behaviors())
     all_results.extend(test_pane_context_resolution())
     all_results.extend(validate_hooks_json())

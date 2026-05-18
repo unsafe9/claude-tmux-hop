@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -13,6 +14,30 @@ from .base import SUBPROCESS_TIMEOUT, PaneContext, run_command
 MACOS_PROCESS_NAMES = {
     "Ghostty": "ghostty",
 }
+
+
+# Maps a .app bundle directory name -> the app name passed to focus handlers.
+# Used to identify the owning terminal app by walking the tmux client's
+# process tree when env vars (__CFBundleIdentifier, TERM_PROGRAM) are stale.
+MACOS_APP_BUNDLE_NAMES = {
+    "Ghostty": "Ghostty",
+    "iTerm": "iTerm",
+    "iTerm2": "iTerm",
+    "Terminal": "Terminal",
+    "Alacritty": "Alacritty",
+    "kitty": "kitty",
+    "WezTerm": "WezTerm",
+    "Hyper": "Hyper",
+    "Cursor": "Cursor",
+    "Visual Studio Code": "Visual Studio Code",
+    "Windsurf": "Windsurf",
+    "Zed": "Zed",
+    "Zed Preview": "Zed",
+    "Antigravity": "Antigravity",
+    "Rio": "Rio",
+}
+
+_APP_BUNDLE_RE = re.compile(r"/([^/]+)\.app/")
 
 
 def _escape_applescript_string(s: str) -> str:
@@ -150,6 +175,121 @@ tell application "Terminal"
 end tell
 '''
     return _run_osascript(script)
+
+
+def _app_from_executable_path(path: str) -> str | None:
+    """Extract a known terminal app name from a process executable path.
+
+    Looks for `/<Name>.app/` in the path and maps it through
+    MACOS_APP_BUNDLE_NAMES. Returns None when no known bundle matches.
+    """
+    if not path:
+        return None
+    match = _APP_BUNDLE_RE.search(path)
+    if not match:
+        return None
+    return MACOS_APP_BUNDLE_NAMES.get(match.group(1))
+
+
+def _build_process_map() -> dict[str, tuple[str, str]]:
+    """Snapshot all processes as {pid: (ppid, executable_path)}.
+
+    A single `ps -A` call instead of one `ps -p <pid>` per walk step keeps
+    detection cheap when this runs on every hook fire.
+    """
+    try:
+        result = subprocess.run(
+            ["ps", "-A", "-o", "pid=,ppid=,comm="],
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return {}
+    if result.returncode != 0:
+        return {}
+
+    procs: dict[str, tuple[str, str]] = {}
+    for line in result.stdout.splitlines():
+        # pid and ppid are integers; comm may contain spaces.
+        parts = line.strip().split(None, 2)
+        if len(parts) < 3:
+            continue
+        pid, ppid, comm = parts
+        procs[pid] = (ppid, comm)
+    return procs
+
+
+def _walk_pid_to_terminal_app(
+    start_pid: str,
+    procs: dict[str, tuple[str, str]] | None = None,
+) -> str | None:
+    """Walk parents from start_pid looking for a known terminal app bundle."""
+    if procs is None:
+        procs = _build_process_map()
+    if not procs:
+        return None
+
+    pid = start_pid
+    seen: set[str] = set()
+    while pid in procs and pid not in seen:
+        seen.add(pid)
+        ppid, comm = procs[pid]
+        app = _app_from_executable_path(comm)
+        if app:
+            return app
+        if not ppid or ppid == "1" or ppid == pid:
+            return None
+        pid = ppid
+    return None
+
+
+def detect_terminal_app_via_tmux_client(
+    session_name: str | None = None,
+) -> str | None:
+    """Detect the owning terminal app by walking the tmux client's process tree.
+
+    On macOS inside tmux, env vars like __CFBundleIdentifier and TERM_PROGRAM
+    are inherited from the terminal that first started the tmux server and
+    can be stale after re-attaching from a different terminal app (e.g.
+    server started under Terminal.app, later attached from Ghostty). The
+    tmux client process is owned by the actually-attached terminal, so its
+    process ancestry is the source of truth.
+
+    Args:
+        session_name: Optional tmux session to scope the client lookup; when
+            omitted, the most-recently-active client across all sessions wins.
+
+    Returns:
+        Terminal app name (e.g. "Ghostty") or None when detection fails.
+    """
+    args = ["tmux", "list-clients", "-F", "#{client_activity}\t#{client_pid}"]
+    if session_name:
+        args.extend(["-t", session_name])
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    if not lines:
+        return None
+
+    # Multiple clients can share a session; prefer the most-recently-active one.
+    lines.sort(reverse=True)
+    parts = lines[0].split("\t", 1)
+    if len(parts) < 2 or not parts[1]:
+        return None
+    return _walk_pid_to_terminal_app(parts[1])
 
 
 def _focus_running_app_process(process_name: str) -> bool:

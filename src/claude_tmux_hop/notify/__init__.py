@@ -20,7 +20,12 @@ from .base import (
     PaneContext,
 )
 from .linux import LinuxFocusDetector, LinuxFocusHandler, LinuxNotifier
-from .macos import MacOSFocusDetector, MacOSFocusHandler, MacOSNotifier
+from .macos import (
+    MacOSFocusDetector,
+    MacOSFocusHandler,
+    MacOSNotifier,
+    detect_terminal_app_via_tmux_client,
+)
 from .terminals import MACOS_BUNDLE_MAP, TERMINAL_APP_MAP
 from .windows import WindowsFocusDetector, WindowsFocusHandler, WindowsNotifier
 
@@ -90,8 +95,13 @@ FOCUS_DETECTORS: dict[str, type[FocusDetector]] = {
 # =============================================================================
 
 
-def _get_terminal_app() -> str | None:
+def _get_terminal_app(session_name: str | None = None) -> str | None:
     """Get terminal app name from config or environment.
+
+    Args:
+        session_name: Optional tmux session name. Passed through to the macOS
+            tmux-client detection so it can scope the client lookup to the
+            session that triggered the hook.
 
     Returns:
         App name for focus command, or None if not detected
@@ -100,6 +110,15 @@ def _get_terminal_app() -> str | None:
     configured = get_global_option("@hop-terminal-app", "")
     if configured:
         return configured
+
+    # macOS inside tmux: env vars are inherited from the terminal that started
+    # the tmux server and become stale after re-attaching from another
+    # terminal app. The attached tmux client process belongs to the real
+    # owner, so its ancestry beats env vars when available.
+    if sys.platform == "darwin" and os.environ.get("TMUX"):
+        via_client = detect_terminal_app_via_tmux_client(session_name)
+        if via_client:
+            return via_client
 
     term_program = os.environ.get("TERM_PROGRAM", "")
     term_program_app = None
@@ -243,13 +262,12 @@ def is_terminal_focused(
     if not detector_class:
         return False
 
+    if session_name is None and os.environ.get("TMUX"):
+        session_name = _get_tmux_session_name()
     if app_name is None:
-        app_name = _get_terminal_app()
+        app_name = _get_terminal_app(session_name)
     if not app_name:
         return False
-
-    if session_name is None:
-        session_name = _get_tmux_session_name()
     return detector_class().is_focused(app_name, session_name)
 
 
@@ -290,8 +308,10 @@ def focus_terminal(
     Returns:
         True on success.
     """
+    if session_name is None and os.environ.get("TMUX"):
+        session_name = _get_tmux_session_name()
     if app_name is None:
-        app_name = _get_terminal_app()
+        app_name = _get_terminal_app(session_name)
     if not app_name:
         log_debug("focus: could not detect terminal app")
         return False
@@ -299,8 +319,6 @@ def focus_terminal(
     platform = get_platform()
     handler_class = FOCUS_HANDLERS.get(platform)
     if handler_class:
-        if session_name is None:
-            session_name = _get_tmux_session_name()
         return handler_class().focus(app_name, session_name)
     return False
 
@@ -320,9 +338,10 @@ def handle_state_notifications(state: str, project: str, pane_context: PaneConte
         return
 
     # Resolve terminal identity once; the probe and the focus path both need it
-    # and each resolution issues a tmux subprocess.
-    app_name = _get_terminal_app()
-    session_name = _get_tmux_session_name() if app_name else None
+    # and each resolution issues a tmux subprocess. Session name resolves
+    # first so macOS tmux-client detection can scope its lookup.
+    session_name = _get_tmux_session_name() if os.environ.get("TMUX") else None
+    app_name = _get_terminal_app(session_name)
 
     # Single probe gates both paths so we don't steal focus from a user
     # already looking at the terminal.
