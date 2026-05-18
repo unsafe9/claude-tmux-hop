@@ -1,0 +1,194 @@
+---
+name: hop-config
+description: Inspect and persistently change `@hop-*` tmux options exposed by the `claude-tmux-hop` plugin (auto-hop, notifications, focus, keybindings, status format, cycle mode). Trigger whenever the user wants to view, enable, disable, or tune any claude-tmux-hop behavior — "auto-hop 켜줘", "waiting일 때만 알림 받게 해줘", "팝업 끄고 포커스만", "hop 키바인딩 바꿔", "@hop-auto 설정", "show hop config", "configure claude-tmux-hop", "turn on auto switching", "make it focus terminal when waiting", "change cycle key to ctrl-h". Both runtime (`tmux set-option -g`) AND on-disk (tmux.conf) must be updated so the change survives a tmux restart. Only relevant inside a tmux session with the plugin installed.
+---
+
+# hop-config
+
+Manage `@hop-*` tmux options for the `claude-tmux-hop` plugin so the changes apply immediately AND survive a tmux restart.
+
+The plugin reads its behavior from tmux options at startup (via `hop.tmux`) and at runtime (via the Python CLI). Setting an option only at runtime works until tmux restarts; writing it into `tmux.conf` works after restart but doesn't take effect now. The user always wants both, so this skill always does both.
+
+## When to use
+
+Trigger when the user asks to view or change anything the plugin documents as configurable — auto-hop targets, notification states, terminal focus, keybindings, status format, cycle mode, terminal app override. Korean phrasing is common ("켜줘", "꺼줘", "바꿔줘") — react to intent, not exact keywords.
+
+Do **not** trigger when:
+- The user is asking about session *state* across panes — that's the `hop-status` skill.
+- The user is outside tmux (`$TMUX` unset). Tell them and stop.
+- The plugin isn't installed (no `@hop-status` global option, no `claude-tmux-hop` binary on PATH). Suggest `claude-tmux-hop doctor` or `install`.
+
+## Option catalog
+
+These are the only options to touch. Everything else under `@hop-*` is internal runtime state (`@hop-state`, `@hop-timestamp`, `@hop-previous-pane`, `@hop-status`) and **must not** be edited — leave them alone.
+
+| Option | Default | Valid values | What it does |
+|---|---|---|---|
+| `@hop-cycle-key` | `Space` | tmux key (e.g. `Space`, `C-h`, `M-j`) | Prefix-table key to cycle to next pane. |
+| `@hop-picker-key` | `C-f` | tmux key | Prefix-table key to open the fzf picker. |
+| `@hop-back-key` | `C-Space` | tmux key | Prefix-table key to jump back to the previous pane. |
+| `@hop-inbox-key` | `i` | single key | Prefix-table key to open the notification inbox menu. |
+| `@hop-cycle-mode` | `priority` | `priority` \| `flat` | Cycle order. `priority` groups by state (waiting → idle → active); `flat` cycles in tmux's pane order. |
+| `@hop-auto` | (empty) | comma list of `waiting`, `idle`, `active` | States that auto-switch the user to the target pane. Empty = disabled. |
+| `@hop-auto-priority-only` | `on` | `on` \| `off` | When `on`, suppress auto-hop if another pane is already at a higher-priority state. |
+| `@hop-notify` | (empty) | comma list of states | States that fire an OS notification (toast). Empty = disabled. |
+| `@hop-focus-app` | (empty) | comma list of states | States that bring the terminal app to the foreground and navigate to the pane's tab. Empty = disabled. |
+| `@hop-terminal-app` | (auto-detected) | terminal app name (`iTerm`, `Ghostty`, `Alacritty`, …) | Override the auto-detected terminal. Only set if focus is targeting the wrong app. |
+| `@hop-status-format` | `{waiting:󰂜} {idle:󰄬}` | format string with `{state:icon}` tokens, separated by spaces | Status-bar segment rendered by `#{E:@hop-status}`. Each token expands to `icon count` when count > 0, empty otherwise. Common addition: include `{active:󰑮}` to also show running panes. |
+
+### Priority semantics for state lists
+
+`waiting` > `idle` > `active`. State lists are processed by inclusion only; order in the comma list does not matter. Canonicalize on write: lowercase, deduplicate, drop unknown tokens. Empty string is the explicit "disabled" value (do not use `off`).
+
+## Workflow
+
+Follow these four steps in order. Do not skip step 3 (confirmation) when making changes — config edits are easy to revert but easier still to avoid.
+
+### 1. Read current state
+
+Run these in parallel:
+
+```bash
+tmux show-options -g | grep -E '^@hop-' || true
+```
+
+Parse the output. Strip surrounding quotes from values. Compare against the defaults table; mark each as `default` / `set: <value>`. Ignore internal options listed above.
+
+If the user only asked to *see* the config, format a short table here and stop.
+
+### 2. Find the active tmux.conf
+
+Search in this order (mirrors `paths.py:get_active_tmux_config()`) and use the **first existing** file:
+
+1. `$XDG_CONFIG_HOME/tmux/tmux.conf` (or `~/.config/tmux/tmux.conf` if `XDG_CONFIG_HOME` is unset)
+2. `~/.tmux.conf`
+3. `~/.tmux.conf.local` (oh-my-tmux)
+4. `$XDG_CONFIG_HOME/tmux/tmux.conf.local`
+
+```bash
+for p in "${XDG_CONFIG_HOME:-$HOME/.config}/tmux/tmux.conf" "$HOME/.tmux.conf" "$HOME/.tmux.conf.local" "${XDG_CONFIG_HOME:-$HOME/.config}/tmux/tmux.conf.local"; do
+  [ -e "$p" ] && { echo "$p"; readlink -f "$p"; break; }
+done
+```
+
+If `readlink -f` differs from the original, the file is a symlink — usually a dotfiles repo. The user almost always wants the change committed there, so:
+- Edit through the symlink path (the OS will write to the target). The `Edit` tool handles this transparently.
+- Tell the user the resolved path and that the edit will land in their dotfiles repo, so they remember to commit/push.
+
+If none of the four paths exist, do not silently create one. Ask the user where their tmux.conf is, or suggest running `claude-tmux-hop install` (which writes one).
+
+### 3. Show the plan, get confirmation
+
+Before editing, surface a one-screen plan:
+
+```
+config: ~/.config/tmux/tmux.conf  (→ /Users/foo/dotfiles/tmux.conf)
+plan:
+  @hop-auto: 'waiting' → 'waiting,idle'        (edit existing line)
+  @hop-focus-app: (unset) → 'waiting'          (append new line)
+runtime: tmux set-option -g for both
+```
+
+If the user already gave explicit, unambiguous instructions for a single change, you can proceed without an extra round-trip — but still print the plan before you edit, so they see what's about to happen.
+
+### 4. Apply: file + runtime + targeted reload
+
+For each option being changed, do these in order. **Before** editing anything, capture the OLD values for keybinding options — you'll need them to unbind cleanly in step C.
+
+**A. Update the file** with the `Edit` tool.
+
+Match any of these existing forms (whitespace-tolerant) and replace the whole line:
+
+```
+set  -g  @hop-X 'value'
+set  -g  @hop-X "value"
+set  -g  @hop-X value
+set-option  -g  @hop-X 'value'
+```
+
+Canonical form to write:
+
+```
+set -g @hop-X 'value'
+```
+
+Use single quotes; escape any literal single quotes in the value by closing-and-reopening (`'\''`). Keep the existing line's leading indentation if any. Do not touch any other `@hop-X` line.
+
+If no existing line matches, append the new line. Placement preference:
+1. Just below an existing block of `set -g @hop-*` lines.
+2. Otherwise, just below the `run '…claude-tmux-hop/hop.tmux'` (or `set -g @plugin '…/claude-tmux-hop'`) line.
+3. Otherwise, at end of file.
+
+**Never** add commentary like `# added by Claude` — keep the file clean.
+
+**B. Update runtime:**
+
+```bash
+tmux set-option -g @hop-X 'value'
+```
+
+For removals (user says "disable", "off"), write empty string (e.g. `@hop-auto`, `@hop-notify`, `@hop-focus-app`) — that's how the plugin spells "off". For genuinely orthogonal options (keybindings, `@hop-cycle-mode`, `@hop-terminal-app`), `set -gu @hop-X` to truly unset, and delete the line from the file rather than leaving an empty-string assignment.
+
+**C. Targeted reload — only when needed.**
+
+Most options are read by the Python CLI on every call (`@hop-auto`, `@hop-auto-priority-only`, `@hop-notify`, `@hop-focus-app`, `@hop-terminal-app`, `@hop-status-format`), so step B is enough — the change is live immediately and survives restart via step A.
+
+But two categories of options are **baked into tmux bindings at plugin load time** by `hop.tmux:main()` and need a reload to take effect right now:
+
+| Option | Why a reload is needed |
+|---|---|
+| `@hop-cycle-key`, `@hop-picker-key`, `@hop-back-key`, `@hop-inbox-key` | The key is hard-coded into a `tmux bind-key` call. Changing the option doesn't re-bind anything. |
+| `@hop-cycle-mode` | The mode string is baked into the `cycle` shell command behind the cycle key. |
+
+When any option from the table above changed, run this reload sequence:
+
+```bash
+# 1. Unbind the OLD keys you captured before editing (if a keybind changed).
+#    Use the table below for the binding flavor.
+tmux unbind-key '<old-cycle-key>'            # prefix table
+tmux unbind-key '<old-picker-key>'           # prefix table
+tmux unbind-key '<old-inbox-key>'            # prefix table
+tmux unbind-key -n '<old-back-key>'          # root table — note -n
+
+# 2. Re-run hop.tmux. This re-reads all options and re-binds with the new values,
+#    and is safe to run repeatedly. It does NOT re-run the user's whole tmux.conf,
+#    so unrelated config (status line, other plugins, other key tables) is untouched.
+plugin_root=$(tmux show-environment -g TMUX_PLUGIN_MANAGER_PATH 2>/dev/null \
+              | sed 's/^TMUX_PLUGIN_MANAGER_PATH=//' | sed "s|^~|$HOME|")
+plugin_root="${plugin_root:-$HOME/.tmux/plugins}/claude-tmux-hop"
+tmux run-shell "$plugin_root/hop.tmux"
+```
+
+Skip step 1 entirely if no keybinding option changed (e.g. `@hop-cycle-mode` flip alone). Skip the whole sequence if only Python-CLI-side options changed.
+
+If the resolved `$plugin_root/hop.tmux` does not exist (user-local install, atypical TPM layout), fall back to telling the user to reload tmux manually (`tmux source-file <conf>`) and explain why — do not guess at paths.
+
+**D. Verify:**
+
+```bash
+tmux show-options -g @hop-X
+grep -n "@hop-X" <config-path>
+tmux list-keys | grep -E "claude-tmux-hop|hop_picker|hop_inbox|<cmd-path>"  # only when a keybind changed
+```
+
+The first two should agree on the new value; the third should show bindings on the new keys and **no** binding on the old keys. Report what changed in one line per option.
+
+## Validation rules
+
+Reject and ask before writing if any of these hold:
+
+- A state list contains a token that isn't `waiting`, `idle`, or `active`.
+- A toggle option (`@hop-auto-priority-only`) is set to anything other than `on` / `off`.
+- `@hop-cycle-mode` is set to anything other than `priority` / `flat`.
+- A keybinding contains a space (tmux keys are single tokens).
+- `@hop-status-format` has unbalanced braces or uses an unknown state token.
+
+If the user's intent is ambiguous ("turn on notifications" — for which states?), default to `waiting` and say so in the plan. Waiting is almost always the right answer because it's the only state that actively blocks the user.
+
+## Things to avoid
+
+- **Do not edit pane-scoped state.** `@hop-state` and `@hop-timestamp` are set per-pane by the plugin's hooks; touching them corrupts the picker and inbox.
+- **Do not run `tmux source-file`** unless the user asks. It re-runs the whole config and can have side effects elsewhere (status line resets, key tables re-bound, plugins re-init). The reload step in 4C uses `tmux run-shell '<plugin>/hop.tmux'` which is scoped to this plugin only — prefer that path.
+- **Do not write a new tmux.conf from scratch.** If none exists, defer to `claude-tmux-hop install`.
+- **Do not silently rewrite formatting** of unrelated lines. Edit the smallest possible region.
+- **Do not git-commit or push the dotfiles repo.** Surface the resolved path and let the user commit themselves.

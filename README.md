@@ -51,6 +51,7 @@ Any existing Claude Code sessions will be automatically discovered and registere
 |-----|--------|
 | `prefix + Space` | Cycle to next Claude Code pane |
 | `prefix + C-f` | Open picker menu |
+| `prefix + i` | Open notification inbox menu |
 | `C-Space` | Jump back to previous pane (no prefix) |
 
 ### Configuration
@@ -66,6 +67,10 @@ set -g @hop-picker-key 'C-f'
 
 # Customize back key (default: C-Space, root binding - no prefix)
 set -g @hop-back-key 'C-Space'
+
+# Customize notification inbox key (default: i)
+# Opens a display-menu listing recent waiting/idle state changes; selecting an entry switches to that pane.
+set -g @hop-inbox-key 'i'
 
 # Cycle mode (default: priority)
 # - priority: cycle within highest-priority group only

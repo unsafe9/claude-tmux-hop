@@ -38,6 +38,9 @@ src/claude_tmux_hop/
     terminals.py  # Terminal app detection mappings (bundle IDs, env vars)
 hooks/
   hooks.json      # Hook definitions (9 hooks)
+skills/
+  hop-status/SKILL.md       # Skill: summarize all tracked Claude sessions and states
+  hop-config/SKILL.md       # Skill: inspect and edit @hop-* tmux options (persistent)
 hop.tmux          # TPM plugin entry point
 ```
 
