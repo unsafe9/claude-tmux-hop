@@ -1468,6 +1468,113 @@ def test_inbox_skips_conductor() -> list[TestResult]:
     return results
 
 
+def test_spawn_window_session_target_disambiguation() -> list[TestResult]:
+    """`spawn_window` must target sessions as `name:` to avoid window-name collisions.
+
+    Regression for: when a window in another session shares the spawn-task
+    `--session` argument's name, `tmux -t <name>` resolves to that window and
+    `new-window` fails with "index N in use". Forcing the trailing colon
+    makes the target unambiguous (session-only).
+    """
+    from . import tmux
+
+    results = []
+
+    # Case A: session already exists → new-window path.
+    calls_a: list[tuple] = []
+
+    def fake_run_a(*args, check=True):
+        calls_a.append(args)
+        if args[0] == "new-window":
+            return "@42"
+        return ""
+
+    original_run = tmux.run_tmux
+    original_has = tmux.has_session
+    original_sleep = tmux.time.sleep
+    try:
+        tmux.run_tmux = fake_run_a
+        tmux.has_session = lambda name: True
+        tmux.time.sleep = lambda _: None
+
+        tmux.spawn_window(
+            session="my-terminal",
+            cwd="/tmp",
+            prompt="",
+            window_name=None,
+            switch=False,
+        )
+
+        new_window_calls = [c for c in calls_a if c and c[0] == "new-window"]
+        ok = (
+            len(new_window_calls) == 1
+            and "-t" in new_window_calls[0]
+            and new_window_calls[0][new_window_calls[0].index("-t") + 1] == "my-terminal:"
+        )
+        results.append(TestResult(
+            "spawn_window_session_target__new_window_uses_colon",
+            ok,
+            f"Expected new-window -t my-terminal:, got {new_window_calls}",
+        ))
+    finally:
+        tmux.run_tmux = original_run
+        tmux.has_session = original_has
+        tmux.time.sleep = original_sleep
+
+    # Case B: session missing → spawn_session + display-message path.
+    calls_b: list[tuple] = []
+
+    def fake_run_b(*args, check=True):
+        calls_b.append(args)
+        if args[0] == "display-message":
+            return "@99"
+        return ""
+
+    try:
+        tmux.run_tmux = fake_run_b
+        tmux.has_session = lambda name: False
+        tmux.time.sleep = lambda _: None
+
+        tmux.spawn_window(
+            session="my-terminal",
+            cwd="/tmp",
+            prompt="",
+            window_name=None,
+            switch=False,
+        )
+
+        send_keys_calls = [c for c in calls_b if c and c[0] == "send-keys"]
+        display_msg_calls = [c for c in calls_b if c and c[0] == "display-message"]
+
+        first_send = send_keys_calls[0] if send_keys_calls else ()
+        send_target_ok = (
+            "-t" in first_send
+            and first_send[first_send.index("-t") + 1] == "my-terminal:"
+        )
+        results.append(TestResult(
+            "spawn_window_session_target__send_keys_uses_colon",
+            send_target_ok,
+            f"Expected send-keys -t my-terminal:, got {first_send}",
+        ))
+
+        display_ok = (
+            len(display_msg_calls) >= 1
+            and "-t" in display_msg_calls[0]
+            and display_msg_calls[0][display_msg_calls[0].index("-t") + 1] == "my-terminal:"
+        )
+        results.append(TestResult(
+            "spawn_window_session_target__display_message_uses_colon",
+            display_ok,
+            f"Expected display-message -t my-terminal:, got {display_msg_calls}",
+        ))
+    finally:
+        tmux.run_tmux = original_run
+        tmux.has_session = original_has
+        tmux.time.sleep = original_sleep
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -1492,6 +1599,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_send_prompt_blocks_active_pane())
     all_results.extend(test_conductor_session_excluded())
     all_results.extend(test_inbox_skips_conductor())
+    all_results.extend(test_spawn_window_session_target_disambiguation())
     all_results.extend(validate_hooks_json())
 
     passed = sum(1 for r in all_results if r.passed)

@@ -288,7 +288,10 @@ def spawn_session(name: str, cwd: str) -> None:
     further keystrokes.
     """
     run_tmux("new-session", "-d", "-s", name, "-c", cwd)
-    run_tmux("send-keys", "-t", name, "claude", "Enter")
+    # `-t name:` (trailing colon) forces tmux to treat the target as a session,
+    # not a window name — without it, a stray window named `name` elsewhere
+    # would win the resolution and the send-keys lands on the wrong pane.
+    run_tmux("send-keys", "-t", f"{name}:", "claude", "Enter")
 
 
 def spawn_window(
@@ -309,15 +312,20 @@ def spawn_window(
         f"window_name={window_name or ''} switch={switch}"
     )
 
+    # `session:` (trailing colon) forces tmux to treat the target as a
+    # session — without it, a window named `session` somewhere else wins
+    # the resolution and tmux errors with "index N in use" (or worse,
+    # creates the window in the wrong session).
+    session_target = f"{session}:"
     if not has_session(session):
         spawn_session(session, cwd)
         time.sleep(CLAUDE_BOOT_SLEEP)
         window_id = run_tmux(
-            "display-message", "-p", "-t", session, "#{window_id}"
+            "display-message", "-p", "-t", session_target, "#{window_id}"
         )
     else:
         new_window_args = ["new-window", "-P", "-F", "#{window_id}",
-                           "-t", session, "-c", cwd]
+                           "-t", session_target, "-c", cwd]
         if window_name:
             new_window_args.extend(["-n", window_name])
         window_id = run_tmux(*new_window_args)
