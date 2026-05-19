@@ -245,25 +245,8 @@ def _walk_pid_to_terminal_app(
     return None
 
 
-def detect_terminal_app_via_tmux_client(
-    session_name: str | None = None,
-) -> str | None:
-    """Detect the owning terminal app by walking the tmux client's process tree.
-
-    On macOS inside tmux, env vars like __CFBundleIdentifier and TERM_PROGRAM
-    are inherited from the terminal that first started the tmux server and
-    can be stale after re-attaching from a different terminal app (e.g.
-    server started under Terminal.app, later attached from Ghostty). The
-    tmux client process is owned by the actually-attached terminal, so its
-    process ancestry is the source of truth.
-
-    Args:
-        session_name: Optional tmux session to scope the client lookup; when
-            omitted, the most-recently-active client across all sessions wins.
-
-    Returns:
-        Terminal app name (e.g. "Ghostty") or None when detection fails.
-    """
+def _list_tmux_clients(session_name: str | None) -> list[str]:
+    """Return tmux client lines `activity\tpid`, optionally scoped to a session."""
     args = ["tmux", "list-clients", "-F", "#{client_activity}\t#{client_pid}"]
     if session_name:
         args.extend(["-t", session_name])
@@ -276,11 +259,41 @@ def detect_terminal_app_via_tmux_client(
             check=False,
         )
     except (subprocess.SubprocessError, OSError):
-        return None
+        return []
     if result.returncode != 0:
-        return None
+        return []
+    return [line for line in result.stdout.splitlines() if line.strip()]
 
-    lines = [line for line in result.stdout.splitlines() if line.strip()]
+
+def detect_terminal_app_via_tmux_client(
+    session_name: str | None = None,
+) -> str | None:
+    """Detect the owning terminal app by walking the tmux client's process tree.
+
+    On macOS inside tmux, env vars like __CFBundleIdentifier and TERM_PROGRAM
+    are inherited from the terminal that first started the tmux server and
+    can be stale after re-attaching from a different terminal app (e.g.
+    server started under Terminal.app, later attached from Ghostty). The
+    tmux client process is owned by the actually-attached terminal, so its
+    process ancestry is the source of truth.
+
+    A tmux pane lives in exactly one session, but the user's terminal app
+    attaches to whichever session they're viewing. Hooks fire on every pane
+    regardless of which session has a client right now, so when the session-
+    scoped lookup returns no clients we fall back to the most-recently-active
+    client across all sessions — that's still the same terminal app.
+
+    Args:
+        session_name: Optional tmux session to scope the client lookup; when
+            omitted (or empty for that session), the most-recently-active
+            client across all sessions wins.
+
+    Returns:
+        Terminal app name (e.g. "Ghostty") or None when detection fails.
+    """
+    lines = _list_tmux_clients(session_name) if session_name else []
+    if not lines:
+        lines = _list_tmux_clients(None)
     if not lines:
         return None
 

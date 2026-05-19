@@ -463,6 +463,34 @@ def test_macos_terminal_app_from_process_tree() -> list[TestResult]:
         )
     )
 
+    # Regression: when the requested session has no attached client, fall back
+    # to the most-recently-active client across all sessions. Without this
+    # fallback, hooks fired in background tmux sessions return None and
+    # `_get_terminal_app` rolls down to the stale `__CFBundleIdentifier`,
+    # which causes a phantom `tell application "Terminal" activate` and
+    # launches Terminal.app for users on other terminal emulators.
+    original_list = macos._list_tmux_clients
+    original_walk = macos._walk_pid_to_terminal_app
+
+    def fake_list(session_name):
+        return [] if session_name else ["123\t8947"]
+
+    macos._list_tmux_clients = fake_list
+    macos._walk_pid_to_terminal_app = lambda pid, procs=None: "Ghostty" if pid == "8947" else None
+    try:
+        detected = macos.detect_terminal_app_via_tmux_client("palm")
+    finally:
+        macos._list_tmux_clients = original_list
+        macos._walk_pid_to_terminal_app = original_walk
+
+    results.append(
+        TestResult(
+            "macos_detect_falls_back_to_unscoped_clients",
+            detected == "Ghostty",
+            f"Expected unscoped fallback to surface Ghostty, got {detected!r}",
+        )
+    )
+
     return results
 
 
