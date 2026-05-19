@@ -134,18 +134,20 @@ main() {
     # Bind back key (root binding, no prefix needed)
     tmux bind-key -n "$back_key" run-shell "$cmd back"
 
-    # Conductor (opt-in; off by default). Popup-only; each open spawns a fresh
-    # claude in the workbench dir — no persistent tmux session. The continue
-    # key opens the same popup with `claude --continue` to resume the prior
-    # conductor transcript.
-    local conductor_enabled conductor_popup_key conductor_continue_key
+    # Conductor (opt-in; off by default). A persistent detached tmux session
+    # (default name `conductor`, configurable via @hop-conductor-session) hosts
+    # claude. The popup key attaches the popup to that session (creating it on
+    # demand). `prefix + d` inside the popup detaches without killing claude;
+    # reopening the popup re-attaches. The respawn key tears down the session
+    # first, then re-attaches to a fresh claude (destructive).
+    local conductor_enabled conductor_popup_key conductor_respawn_key
     conductor_enabled=$(get_tmux_option @hop-conductor-enabled "off")
     case "$conductor_enabled" in
         on|1|true|yes)
             conductor_popup_key=$(get_tmux_option @hop-conductor-popup-key "y")
-            conductor_continue_key=$(get_tmux_option @hop-conductor-continue-key "Y")
+            conductor_respawn_key=$(get_tmux_option @hop-conductor-respawn-key "Y")
             tmux bind-key "$conductor_popup_key" run-shell "$cmd conductor --popup"
-            tmux bind-key "$conductor_continue_key" run-shell "$cmd conductor --popup --continue"
+            tmux bind-key "$conductor_respawn_key" run-shell "$cmd conductor --popup --respawn"
             ;;
     esac
 

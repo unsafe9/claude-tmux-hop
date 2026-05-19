@@ -18,7 +18,7 @@ Trigger when the user wants a task to happen *somewhere other than the current s
 
 You'll get triggered from two main contexts:
 
-- **Conductor popup** (`prefix + y` / `prefix + Y`): a fresh pane snapshot is auto-injected at the top of every turn. Use it directly.
+- **Conductor popup** (`prefix + y` attaches; `prefix + Y` respawns): a fresh pane snapshot is auto-injected at the top of every turn. Use it directly. The conductor runs in a persistent background tmux session, so detaching the popup (`prefix + d`) does not abort an in-flight dispatch — the conductor keeps running and the user can re-attach later.
 - **Any other Claude session**: no snapshot is pre-injected. Invoke the `hop-status` skill first (or `claude-tmux-hop list --json` directly) so you can see which panes/sessions exist before picking a target.
 
 Do **not** trigger when:
@@ -90,11 +90,11 @@ Pick exactly one. Defaults when ambiguous are in the table; otherwise ask.
 
 5. **First prompt** is the user's task verbatim, optionally prefixed with a slash-command (`/review-feature`, `/plan`, etc.) when obviously appropriate. Don't paraphrase the user's request away.
 
-6. **Report the outcome** — what command ran, what the CLI said, where the user can find the new window/pane. Especially important for conductor popup callers: the popup closes after dispatch, so the user needs everything in one screen.
+6. **Report the outcome** — what command ran, what the CLI said, where the user can find the new window/pane. The conductor popup stays attached after dispatch (the user detaches manually with `prefix + d`), but they may detach immediately, so put everything they need into one final reply.
 
 ## Safety rules
 
-- **Never `--force` `send-prompt`** unless the user explicitly tells you to override an active pane in this turn. For conductor popup callers, the popup closing after dispatch makes accidental injection irreversible from there.
+- **Never `--force` `send-prompt`** unless the user explicitly tells you to override an active pane in this turn. For conductor popup callers, the user often detaches right after dispatch, so an accidental injection would be effectively irreversible from there.
 - **Never dispatch silently.** Even if mode selection feels obvious, show the plan and let the user confirm. The cost of a wrong dispatch is a derailed Claude session somewhere else in tmux.
 - **Never create a worktree for mode (d) without the branch name.** If you can't infer a branch from context, ask before running `git worktree add`.
 

@@ -369,6 +369,37 @@ def resolve_conductor_dir() -> Path:
     return get_default_conductor_dir()
 
 
+def spawn_conductor_session(name: str, workbench: Path, own_bin: Path) -> None:
+    """Create a detached tmux session hosting the conductor `claude`.
+
+    The session's only window runs `exec claude` directly — when claude exits
+    the window closes, the session ends, and the next attach attempt will
+    recreate fresh. Tmux's `-e` flag injects session-scoped env vars that
+    propagate to every shell/pane in the session, so the hook fast-path
+    (`CLAUDE_TMUX_HOP_CONDUCTOR=1`) and the plugin bin (`PATH`) work without
+    a wrapping shell. `PATH` is captured at session-creation time and frozen
+    for the session's lifetime.
+    """
+    current_path = os.environ.get("PATH", "")
+    augmented_path = f"{own_bin}:{current_path}" if current_path else str(own_bin)
+    run_tmux(
+        "new-session", "-d",
+        "-e", "CLAUDE_TMUX_HOP_CONDUCTOR=1",
+        "-e", f"PATH={augmented_path}",
+        "-s", name,
+        "-c", str(workbench),
+        "exec claude",
+    )
+
+
+def kill_session_if_exists(name: str) -> bool:
+    """Kill the named tmux session if it exists. Returns True if killed."""
+    if not has_session(name):
+        return False
+    run_tmux("kill-session", "-t", name, check=False)
+    return True
+
+
 def send_prompt_to_pane(pane_id: str, prompt: str, switch: bool = True) -> None:
     """Inject `prompt` (and Enter) into an existing pane."""
     log_info(f"send-prompt: pane={pane_id} switch={switch}")

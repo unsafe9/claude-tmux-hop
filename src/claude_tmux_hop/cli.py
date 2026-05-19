@@ -28,13 +28,16 @@ from .tmux import (
     get_hop_panes,
     get_stale_panes,
     has_hop_state,
+    has_session,
     is_in_tmux,
+    kill_session_if_exists,
     parse_state_set,
     resolve_conductor_dir,
     run_tmux,
     send_prompt_to_pane,
     set_pane_state,
     set_pane_task,
+    spawn_conductor_session,
     spawn_window,
     switch_to_pane,
     validate_waiting_panes,
@@ -926,12 +929,13 @@ def cmd_send_prompt(args: argparse.Namespace) -> int:
 
 
 def cmd_conductor(args: argparse.Namespace) -> int:
-    """Open the conductor popup, or refresh the workbench CLAUDE.md.
+    """Open the conductor popup, kill its session, or refresh the workbench CLAUDE.md.
 
-    The popup runs `cd <workbench> && claude [--continue]` directly — no
-    persistent tmux session, no chrome. Each invocation is a fresh claude
-    process; `--continue` resumes the conductor's own prior transcript
-    (claude resolves it from the popup cwd).
+    The popup attaches to a persistent detached `conductor` tmux session
+    (created on demand). `prefix + d` inside the popup detaches without
+    killing claude; re-attaching picks up the same claude with whatever
+    progress it has made. `--respawn` rebuilds the session from scratch
+    (destructive). `--kill` tears it down without opening a popup.
     """
     import shlex
     from .install import (
@@ -940,7 +944,7 @@ def cmd_conductor(args: argparse.Namespace) -> int:
         update_conductor_instructions,
     )
 
-    log_cli_call("conductor", {"mode": args.mode, "resume": args.resume, "force": args.force})
+    log_cli_call("conductor", {"mode": args.mode, "respawn": args.respawn, "force": args.force})
     conductor_dir = resolve_conductor_dir()
 
     if args.mode == "update_instructions":
@@ -963,6 +967,17 @@ def cmd_conductor(args: argparse.Namespace) -> int:
         print("Error: Not running inside tmux", file=sys.stderr)
         return 1
 
+    session = get_global_option("@hop-conductor-session", "conductor")
+
+    if args.mode == "kill":
+        killed = kill_session_if_exists(session)
+        print(
+            f"killed conductor session: {session}"
+            if killed
+            else f"no conductor session to kill: {session}"
+        )
+        return 0
+
     if not _is_conductor_enabled():
         print(
             "conductor disabled. enable via: tmux set -g @hop-conductor-enabled on",
@@ -972,30 +987,26 @@ def cmd_conductor(args: argparse.Namespace) -> int:
 
     ensure_conductor_dir(conductor_dir)
 
-    # `claude --continue` exits non-zero when there's no prior transcript
-    # for this cwd, so chain it with a fresh `claude` as a fallback. Caveat:
-    # this also triggers if the user Ctrl+C's out of the resumed session —
-    # they'll land on a fresh claude and need to quit again. Acceptable for
-    # a dispatch popup where Ctrl+C is rare.
-    claude_cmd = "claude --continue || claude" if args.resume else "claude"
-    # Plugin-only users have our bin at ~/.claude/plugins/.../bin (not on PATH),
-    # so the popup's shell can't find `claude-tmux-hop` for in-popup tooling
-    # (hop-config skill, etc.). Prepend our bin dir — pip users already have it
-    # on PATH and a redundant prepend is harmless.
-    own_bin = shlex.quote(str(Path(sys.argv[0]).resolve().parent))
-    # `CLAUDE_TMUX_HOP_CONDUCTOR=1` lets the SessionStart/UserPromptSubmit
-    # hooks short-circuit in the shell — non-conductor Claude sessions skip
-    # the Python interpreter entirely (~50ms saved per prompt per session).
-    # The CLI handlers still do their own cwd check as a second guard.
-    popup_cmd = (
-        f"export PATH={own_bin}:$PATH && "
-        f"export CLAUDE_TMUX_HOP_CONDUCTOR=1 && "
-        f"cd {shlex.quote(str(conductor_dir))} && {claude_cmd}"
-    )
-    # display-popup -E propagates the inner shell's exit code; claude can exit
-    # non-zero in normal cases (e.g. user :q-ing out of certain flows). The
-    # popup itself launched fine, so don't treat that as a tmux failure.
-    run_tmux("display-popup", "-E", "-w", "80%", "-h", "80%", popup_cmd, check=False)
+    if args.respawn:
+        kill_session_if_exists(session)
+
+    if not has_session(session):
+        # Plugin-only users have our bin at ~/.claude/plugins/.../bin (not on
+        # PATH), so the conductor's shell can't find `claude-tmux-hop` for
+        # in-conductor tooling (hop-config skill, etc.). Prepend our bin dir
+        # via tmux's session-scoped env — pip users already have it on PATH
+        # and a redundant prepend is harmless. The `CLAUDE_TMUX_HOP_CONDUCTOR=1`
+        # env var lets the SessionStart/UserPromptSubmit hooks short-circuit
+        # for every claude in this session (the CLI handlers still do their
+        # own cwd check as a second guard).
+        own_bin = Path(sys.argv[0]).resolve().parent
+        spawn_conductor_session(session, conductor_dir, own_bin)
+
+    # display-popup -E propagates the inner shell's exit code; `tmux attach`
+    # returns non-zero on certain detach paths. The popup itself launched
+    # fine, so don't treat that as a tmux failure.
+    attach_cmd = f"tmux attach -t {shlex.quote(session)}"
+    run_tmux("display-popup", "-E", "-w", "80%", "-h", "80%", attach_cmd, check=False)
     return 0
 
 

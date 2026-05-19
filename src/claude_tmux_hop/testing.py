@@ -972,7 +972,7 @@ def test_send_prompt_arg_parsing() -> list[TestResult]:
 
 
 def test_conductor_arg_parsing() -> list[TestResult]:
-    """`conductor` parses mode + resume + force flags into the expected namespace."""
+    """`conductor` parses mode + respawn + force flags into the expected namespace."""
     results = []
 
     parser = _build_full_parser()
@@ -980,15 +980,15 @@ def test_conductor_arg_parsing() -> list[TestResult]:
     ns_default = parser.parse_args(["conductor"])
     results.append(TestResult(
         "conductor_arg_parsing__defaults_to_popup_mode",
-        ns_default.mode == "popup" and ns_default.resume is False and ns_default.force is False,
-        f"Expected mode=popup, resume=False, force=False; got {ns_default!r}",
+        ns_default.mode == "popup" and ns_default.respawn is False and ns_default.force is False,
+        f"Expected mode=popup, respawn=False, force=False; got {ns_default!r}",
     ))
 
-    ns_resume = parser.parse_args(["conductor", "--popup", "--continue"])
+    ns_respawn = parser.parse_args(["conductor", "--popup", "--respawn"])
     results.append(TestResult(
-        "conductor_arg_parsing__continue_sets_resume",
-        ns_resume.mode == "popup" and ns_resume.resume is True,
-        f"Expected mode=popup, resume=True; got {ns_resume!r}",
+        "conductor_arg_parsing__respawn_flag",
+        ns_respawn.mode == "popup" and ns_respawn.respawn is True,
+        f"Expected mode=popup, respawn=True; got {ns_respawn!r}",
     ))
 
     ns_update = parser.parse_args(["conductor", "--update-instructions"])
@@ -1005,7 +1005,14 @@ def test_conductor_arg_parsing() -> list[TestResult]:
         f"Expected mode=update_instructions, force=True; got {ns_force!r}",
     ))
 
-    # --popup and --update-instructions are mutually exclusive
+    ns_kill = parser.parse_args(["conductor", "--kill"])
+    results.append(TestResult(
+        "conductor_arg_parsing__kill_mode",
+        ns_kill.mode == "kill",
+        f"Expected mode=kill; got {ns_kill!r}",
+    ))
+
+    # --popup, --update-instructions, --kill are mutually exclusive
     mutex_ok = False
     try:
         with redirect_stderr(io.StringIO()):
@@ -1016,6 +1023,18 @@ def test_conductor_arg_parsing() -> list[TestResult]:
         "conductor_arg_parsing__popup_and_update_are_mutex",
         mutex_ok,
         "Expected SystemExit when combining --popup and --update-instructions",
+    ))
+
+    kill_mutex_ok = False
+    try:
+        with redirect_stderr(io.StringIO()):
+            parser.parse_args(["conductor", "--kill", "--update-instructions"])
+    except SystemExit:
+        kill_mutex_ok = True
+    results.append(TestResult(
+        "conductor_arg_parsing__kill_and_update_are_mutex",
+        kill_mutex_ok,
+        "Expected SystemExit when combining --kill and --update-instructions",
     ))
 
     return results

@@ -322,12 +322,18 @@ def create_parser(
         const="update_instructions",
         help="Refresh the plugin-managed instructions in the workbench CLAUDE.md (preserves user content outside the <conductor-instructions> marker)",
     )
+    conductor_mode_group.add_argument(
+        "--kill",
+        dest="mode",
+        action="store_const",
+        const="kill",
+        help="Kill the conductor tmux session if it exists (idempotent — no-op if not running)",
+    )
     conductor_parser.add_argument(
-        "--continue",
-        dest="resume",
+        "--respawn",
         action="store_true",
         default=False,
-        help="Pass --continue to claude so the popup resumes the prior conductor session (popup mode only)",
+        help="With --popup, kill any existing conductor session before attaching (fresh claude, destructive of in-flight state)",
     )
     conductor_parser.add_argument(
         "--force",
