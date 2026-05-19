@@ -32,6 +32,11 @@ def create_parser(
     cmd_install: CommandHandler,
     cmd_update: CommandHandler,
     cmd_doctor: CommandHandler,
+    cmd_spawn_task: CommandHandler,
+    cmd_send_prompt: CommandHandler,
+    cmd_conductor: CommandHandler,
+    cmd_conductor_context: CommandHandler,
+    cmd_conductor_prompt_context: CommandHandler,
 ) -> argparse.ArgumentParser:
     """Create and configure the argument parser.
 
@@ -129,6 +134,11 @@ def create_parser(
     list_parser = subparsers.add_parser(
         "list",
         help="List all Claude Code panes",
+    )
+    list_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as JSON (with git context per pane)",
     )
     list_parser.set_defaults(func=cmd_list)
 
@@ -252,5 +262,93 @@ def create_parser(
         help="Output results as JSON",
     )
     doctor_parser.set_defaults(func=cmd_doctor)
+
+    # --- Conductor primitives ---
+
+    spawn_task_parser = subparsers.add_parser(
+        "spawn-task",
+        help="Open a new tmux window running claude with a pre-submitted prompt",
+    )
+    spawn_task_parser.add_argument("--cwd", required=True, help="Working directory for the new window")
+    spawn_task_parser.add_argument("--prompt", required=True, help="Prompt to send to claude")
+    spawn_task_parser.add_argument("--session", required=True, help="Target tmux session (created if missing)")
+    spawn_task_parser.add_argument("--window-name", default=None, help="Optional window name")
+    spawn_task_parser.add_argument(
+        "--no-switch",
+        dest="switch",
+        action="store_false",
+        default=True,
+        help="Do not switch the active client to the new window",
+    )
+    spawn_task_parser.set_defaults(func=cmd_spawn_task)
+
+    send_prompt_parser = subparsers.add_parser(
+        "send-prompt",
+        help="Inject a prompt into an existing claude pane",
+    )
+    send_prompt_parser.add_argument("--pane", required=True, help="Target pane id (e.g., %%X)")
+    send_prompt_parser.add_argument("--prompt", required=True, help="Prompt to inject")
+    send_prompt_parser.add_argument(
+        "--no-switch",
+        dest="switch",
+        action="store_false",
+        default=True,
+        help="Do not switch the active client to the target pane",
+    )
+    send_prompt_parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Override the active-pane safety check",
+    )
+    send_prompt_parser.set_defaults(func=cmd_send_prompt)
+
+    conductor_parser = subparsers.add_parser(
+        "conductor",
+        help="Open the conductor popup (fresh claude in the workbench), or refresh its CLAUDE.md",
+    )
+    conductor_mode_group = conductor_parser.add_mutually_exclusive_group()
+    conductor_mode_group.add_argument(
+        "--popup",
+        dest="mode",
+        action="store_const",
+        const="popup",
+        help="Open the conductor popup (default)",
+    )
+    conductor_mode_group.add_argument(
+        "--update-instructions",
+        dest="mode",
+        action="store_const",
+        const="update_instructions",
+        help="Refresh the plugin-managed instructions in the workbench CLAUDE.md (preserves user content outside the <conductor-instructions> marker)",
+    )
+    conductor_parser.add_argument(
+        "--continue",
+        dest="resume",
+        action="store_true",
+        default=False,
+        help="Pass --continue to claude so the popup resumes the prior conductor session (popup mode only)",
+    )
+    conductor_parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="With --update-instructions, overwrite a CLAUDE.md that has no conductor marker (backs up old to CLAUDE.md.bak)",
+    )
+    conductor_parser.set_defaults(mode="popup", func=cmd_conductor)
+
+    # conductor-context (internal — invoked by SessionStart hook)
+    conductor_context_parser = subparsers.add_parser(
+        "conductor-context",
+        help="Emit SessionStart context JSON when running inside the conductor workbench (internal)",
+    )
+    conductor_context_parser.set_defaults(func=cmd_conductor_context)
+
+    # conductor-prompt-context (internal — invoked by UserPromptSubmit hook)
+    conductor_prompt_context_parser = subparsers.add_parser(
+        "conductor-prompt-context",
+        help="Emit UserPromptSubmit context JSON (fresh pane snapshot) when running inside the conductor workbench (internal)",
+    )
+    conductor_prompt_context_parser.set_defaults(func=cmd_conductor_prompt_context)
 
     return parser

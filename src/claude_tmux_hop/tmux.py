@@ -6,6 +6,7 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from .log import log_debug, log_error, log_info
 
@@ -17,6 +18,15 @@ WAITING_STALE_THRESHOLD = 30  # Seconds a pane must stay "waiting" before we
 # status-bar polling path cheap; UserPromptSubmit/Stop hooks already flip state
 # naturally when Claude sees the response, so this only catches rare
 # out-of-band dialog dismissals (ctrl+C etc.).
+
+GIT_TIMEOUT = 5  # Per-call git subprocess timeout
+# Fixed-sleep fragility (known limitation): if the real claude boot takes
+# longer than CLAUDE_BOOT_SLEEP, a literal-mode prompt can race ahead and
+# hit the shell instead of the TUI. Replace with capture-pane polling later.
+CLAUDE_BOOT_SLEEP = 3.0  # Wait for `claude` to be ready for keystrokes
+SEND_KEYS_SETTLE = 0.3  # Pause between literal-prompt send and Enter
+
+CONDUCTOR_TRUTHY = {"on", "1", "true", "yes"}
 
 
 
@@ -222,6 +232,148 @@ def set_global_option(name: str, value: str) -> None:
     run_tmux("set-option", "-g", name, value)
 
 
+def _run_git(*args: str, cwd: str) -> str:
+    """Run a git command in `cwd` and return stdout; "" on any failure."""
+    if not cwd:
+        return ""
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=GIT_TIMEOUT,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def get_git_context(cwd: str) -> dict[str, str]:
+    """Return git branch + worktree root for `cwd`, or {} if not in a repo."""
+    branch = _run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
+    worktree_root = _run_git("rev-parse", "--show-toplevel", cwd=cwd)
+    if not branch and not worktree_root:
+        return {}
+    out: dict[str, str] = {}
+    if branch:
+        out["branch"] = branch
+    if worktree_root:
+        out["worktree_root"] = worktree_root
+    return out
+
+
+def has_session(name: str) -> bool:
+    """Return True if a tmux session with the given name exists."""
+    if not name:
+        return False
+    try:
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", name],
+            capture_output=True,
+            check=False,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return result.returncode == 0
+
+
+def spawn_session(name: str, cwd: str) -> None:
+    """Create a detached tmux session running `claude`.
+
+    Caller is responsible for sleeping `CLAUDE_BOOT_SLEEP` before sending
+    further keystrokes.
+    """
+    run_tmux("new-session", "-d", "-s", name, "-c", cwd)
+    run_tmux("send-keys", "-t", name, "claude", "Enter")
+
+
+def spawn_window(
+    session: str,
+    cwd: str,
+    prompt: str,
+    window_name: str | None = None,
+    switch: bool = True,
+) -> str:
+    """Open a new window running `claude` with `prompt` pre-submitted.
+
+    Creates the session if missing (uses its first window). Returns the
+    window id (e.g., "@42"). Switches the calling client to the new window
+    when `switch=True`.
+    """
+    log_info(
+        f"spawn-task: session={session} cwd={cwd} "
+        f"window_name={window_name or ''} switch={switch}"
+    )
+
+    if not has_session(session):
+        spawn_session(session, cwd)
+        time.sleep(CLAUDE_BOOT_SLEEP)
+        window_id = run_tmux(
+            "display-message", "-p", "-t", session, "#{window_id}"
+        )
+    else:
+        new_window_args = ["new-window", "-P", "-F", "#{window_id}",
+                           "-t", session, "-c", cwd]
+        if window_name:
+            new_window_args.extend(["-n", window_name])
+        window_id = run_tmux(*new_window_args)
+        run_tmux("send-keys", "-t", window_id, "claude", "Enter")
+        time.sleep(CLAUDE_BOOT_SLEEP)
+
+    # send-keys -l (literal) prevents tmux from interpreting special chars
+    # inside the prompt; Enter is delivered separately as a real key.
+    if prompt:
+        run_tmux("send-keys", "-t", window_id, "-l", prompt)
+        time.sleep(SEND_KEYS_SETTLE)
+        run_tmux("send-keys", "-t", window_id, "Enter")
+
+    if switch:
+        try:
+            run_tmux("switch-client", "-t", window_id)
+        except RuntimeError as e:
+            log_debug(f"spawn-task: switch-client failed: {e}")
+
+    return window_id
+
+
+def _get_conductor_session() -> str:
+    """Conductor session name (single source for filtering)."""
+    return get_global_option("@hop-conductor-session", "conductor")
+
+
+def _is_conductor_enabled() -> bool:
+    """Whether the conductor feature is enabled via `@hop-conductor-enabled`."""
+    return get_global_option("@hop-conductor-enabled", "off").strip().lower() in CONDUCTOR_TRUTHY
+
+
+def resolve_conductor_dir() -> Path:
+    """Resolve the workbench directory (honoring `@hop-conductor-dir`)."""
+    from .paths import get_default_conductor_dir
+
+    custom = get_global_option("@hop-conductor-dir", "")
+    if custom:
+        expanded = os.path.expandvars(os.path.expanduser(custom))
+        return Path(expanded).resolve()
+    return get_default_conductor_dir()
+
+
+def send_prompt_to_pane(pane_id: str, prompt: str, switch: bool = True) -> None:
+    """Inject `prompt` (and Enter) into an existing pane."""
+    log_info(f"send-prompt: pane={pane_id} switch={switch}")
+    run_tmux("send-keys", "-t", pane_id, "-l", prompt)
+    time.sleep(SEND_KEYS_SETTLE)
+    run_tmux("send-keys", "-t", pane_id, "Enter")
+    if switch:
+        try:
+            switch_to_pane(pane_id)
+        except RuntimeError as e:
+            log_debug(f"send-prompt: switch_to_pane failed: {e}")
+
+
 def _is_interactive_claude_on_tty(tty: str) -> bool:
     """Check if an interactive Claude Code session is running on a tty.
 
@@ -272,6 +424,7 @@ def get_claude_panes_by_process() -> list[dict]:
 
     Uses ps to check processes on each pane's tty for the 'claude' command.
     Excludes panes running Claude with -p/--print (non-interactive mode).
+    Filters out the conductor session — it must never be cycled into.
 
     Returns:
         List of dicts with pane info for each Claude pane found.
@@ -283,6 +436,7 @@ def get_claude_panes_by_process() -> list[dict]:
         "#{pane_id}\t#{pane_tty}\t#{pane_current_path}\t#{session_name}\t#{window_index}",
     )
 
+    conductor_session = _get_conductor_session()
     panes = []
     for line in output.split("\n"):
         if not line:
@@ -293,6 +447,9 @@ def get_claude_panes_by_process() -> list[dict]:
             continue
 
         pane_id, tty, cwd, session, window_str = parts
+
+        if session == conductor_session:
+            continue
 
         if tty and _is_interactive_claude_on_tty(tty):
             panes.append({
@@ -326,6 +483,7 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
     """
     # Get running Claude panes for validation
     running_pane_ids = get_running_claude_pane_ids() if validate else None
+    conductor_session = _get_conductor_session()
 
     # Query all panes with hop options
     # Format: pane_id \t state \t timestamp \t cwd \t session \t window \t task
@@ -350,6 +508,10 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
 
         # Only include panes with hop state
         if not state:
+            continue
+
+        # Conductor session is never part of the hop cycle.
+        if session == conductor_session:
             continue
 
         # Skip stale panes if validating

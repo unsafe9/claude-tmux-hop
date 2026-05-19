@@ -1,6 +1,6 @@
 ---
 name: hop-config
-description: Inspect and persistently change `@hop-*` tmux options exposed by the `claude-tmux-hop` plugin (auto-hop, notifications, focus, keybindings, status format, cycle mode). Trigger whenever the user wants to view, enable, disable, or tune any claude-tmux-hop behavior — "auto-hop 켜줘", "waiting일 때만 알림 받게 해줘", "팝업 끄고 포커스만", "hop 키바인딩 바꿔", "@hop-auto 설정", "show hop config", "configure claude-tmux-hop", "turn on auto switching", "make it focus terminal when waiting", "change cycle key to ctrl-h". Both runtime (`tmux set-option -g`) AND on-disk (tmux.conf) must be updated so the change survives a tmux restart. Only relevant inside a tmux session with the plugin installed.
+description: Inspect and persistently change `@hop-*` tmux options exposed by the `claude-tmux-hop` plugin (auto-hop, notifications, focus, keybindings, status format, cycle mode), AND update the plugin-managed conductor instructions in the workbench. Trigger whenever the user wants to view, enable, disable, or tune any claude-tmux-hop behavior — "auto-hop 켜줘", "waiting일 때만 알림 받게 해줘", "팝업 끄고 포커스만", "hop 키바인딩 바꿔", "@hop-auto 설정", "show hop config", "configure claude-tmux-hop", "turn on auto switching", "make it focus terminal when waiting", "change cycle key to ctrl-h" — or to update the conductor's instructions: "conductor instructions 업데이트", "conductor 정본 최신화", "conductor CLAUDE.md 갱신", "update conductor instructions". Both runtime (`tmux set-option -g`) AND on-disk (tmux.conf) must be updated so the change survives a tmux restart. Only relevant inside a tmux session with the plugin installed.
 ---
 
 # hop-config
@@ -35,6 +35,11 @@ These are the only options to touch. Everything else under `@hop-*` is internal 
 | `@hop-focus-app` | (empty) | comma list of states | States that bring the terminal app to the foreground and navigate to the pane's tab. Empty = disabled. |
 | `@hop-terminal-app` | (auto-detected) | terminal app name (`iTerm`, `Ghostty`, `Alacritty`, …) | Override the auto-detected terminal. Only set if focus is targeting the wrong app. |
 | `@hop-status-format` | `{waiting:󰂜} {idle:󰄬}` | format string with `{state:icon}` tokens, separated by spaces | Status-bar segment rendered by `#{E:@hop-status}`. Each token expands to `icon count` when count > 0, empty otherwise. Common addition: include `{active:󰑮}` to also show running panes. |
+| `@hop-conductor-enabled` | `off` | `on` \| `1` \| `true` \| `yes` (any other value = off) | **Master toggle** for the Conductor feature. Off by default — when off, no conductor keybinding registers and `conductor --popup` refuses. Other primitives (`spawn-task`, `send-prompt`, `list --json`, `conductor --reset-instructions`) work regardless. |
+| `@hop-conductor-session` | `conductor` | tmux session name | A **reserved session name** used as the single filter source — any tmux session with this name is excluded from cycle/picker/discover/inbox. The plugin itself no longer creates a persistent session; this option only matters if the user manually maintains one. |
+| `@hop-conductor-dir` | (empty → XDG default) | absolute path; supports `~` and `$VAR` expansion | Workbench directory the popup `cd`s into before running `claude`. First popup invocation seeds `<dir>/CLAUDE.md` from the default template; the plugin never overwrites it on upgrade. If you change this option after using the old dir, the new dir gets a fresh seed — you'll need to manually copy over any accumulated knowledge from the old `CLAUDE.md`. |
+| `@hop-conductor-popup-key` | `y` | tmux key (prefix table) | Key to open a **fresh** conductor popup. Every press spawns `cd <dir> && claude` inside `display-popup -E`; closing the popup ends that claude. |
+| `@hop-conductor-continue-key` | `Y` | tmux key (prefix table) | Key to open the popup with `claude --continue`, resuming the prior conductor transcript. Same workbench, same `display-popup` — just adds `--continue` to the claude command. |
 
 ### Priority semantics for state lists
 
@@ -139,6 +144,7 @@ But two categories of options are **baked into tmux bindings at plugin load time
 |---|---|
 | `@hop-cycle-key`, `@hop-picker-key`, `@hop-back-key`, `@hop-inbox-key` | The key is hard-coded into a `tmux bind-key` call. Changing the option doesn't re-bind anything. |
 | `@hop-cycle-mode` | The mode string is baked into the `cycle` shell command behind the cycle key. |
+| `@hop-conductor-enabled`, `@hop-conductor-popup-key`, `@hop-conductor-continue-key` | `hop.tmux` only binds the conductor keys when `enabled` is truthy at load time; flipping `enabled` (or changing either key) requires re-running it. When flipping enabled from `on` → `off`, also `tmux unbind-key` the old conductor keys explicitly; re-running `hop.tmux` no-ops in the disabled branch and won't clean up stale bindings. |
 
 When any option from the table above changed, run this reload sequence:
 
@@ -192,3 +198,35 @@ If the user's intent is ambiguous ("turn on notifications" — for which states?
 - **Do not write a new tmux.conf from scratch.** If none exists, defer to `claude-tmux-hop install`.
 - **Do not silently rewrite formatting** of unrelated lines. Edit the smallest possible region.
 - **Do not git-commit or push the dotfiles repo.** Surface the resolved path and let the user commit themselves.
+
+## Conductor instructions
+
+Different surface from `@hop-*` options: the conductor's plugin-managed instructions live in a `<conductor-instructions>...</conductor-instructions>` block inside the workbench `CLAUDE.md` (`@hop-conductor-dir`, default `~/.config/claude-tmux-hop/conductor/`). Inside the block = plugin-owned. Outside the block = user-owned (preserved across updates).
+
+**Trigger phrases**: "conductor instructions 업데이트", "conductor 정본 최신화", "conductor CLAUDE.md 갱신", "update conductor instructions", "refresh conductor template".
+
+**Workflow**:
+
+1. Run `claude-tmux-hop conductor --update-instructions`. Capture exit code + stdout + stderr.
+
+2. Interpret the result:
+
+   | stdout starts with | exit code | meaning |
+   |---|---|---|
+   | `wrote <path>` | 0 | First-time write into a workbench without a `CLAUDE.md`. |
+   | `updated marker block in <path>` | 0 | Marker found and replaced; user content outside the marker preserved. |
+   | `backed up existing file to <path>.bak` followed by `overwrote <path>` | 0 | `--force` path: existing non-marker file was backed up and overwritten. Only reached when the user explicitly opts into `--force`. |
+   | stderr: conflict message (`exists but has no <conductor-instructions> marker`) | 1 | The workbench `CLAUDE.md` has no marker. Refuses by default. |
+
+3. Report to the user in one line per outcome (verbatim stdout/stderr plus a short summary).
+
+4. **Handling the conflict case** (exit 1):
+   - Tell the user their `CLAUDE.md` has no marker, so the plugin cannot tell plugin-managed content from their customizations.
+   - Offer two paths:
+     - **Recommended**: the user edits the file themselves, wrapping any plugin-template-derived content in `<conductor-instructions>...</conductor-instructions>` tags (or removing it), then re-runs the command.
+     - **`--force`**: the plugin backs up the entire file to `CLAUDE.md.bak` and overwrites with the bare template. User loses any customizations not preserved in `.bak`.
+   - **Do NOT run `--force` without explicit user confirmation.** Wait for an explicit "yes, use `--force`" before retrying.
+
+5. Pure verification commands (read-only, may run without confirmation): `cat <workbench>/CLAUDE.md`, `grep -n conductor-instructions <workbench>/CLAUDE.md` to show the current state.
+
+**Out of scope**: this skill does not edit the workbench `CLAUDE.md` directly. All modification goes through `--update-instructions` so the marker semantics stay consistent. If the user wants free-form edits, point them at the file with the workbench path.

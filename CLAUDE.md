@@ -40,7 +40,8 @@ hooks/
   hooks.json      # Hook definitions (9 hooks)
 skills/
   hop-status/SKILL.md       # Skill: summarize all tracked Claude sessions and states
-  hop-config/SKILL.md       # Skill: inspect and edit @hop-* tmux options (persistent)
+  hop-config/SKILL.md       # Skill: inspect and edit @hop-* tmux options (persistent) + update conductor instructions
+  hop-dispatch/SKILL.md     # Skill: route a task to another Claude pane — pick + execute one of 4 modes (switch / send-prompt / spawn-task / spawn-with-worktree); single source of truth for those CLI flags. Used by the conductor and by general routing requests.
 hop.tmux          # TPM plugin entry point
 ```
 
@@ -63,6 +64,14 @@ claude-tmux-hop <command>
   status                  # Output status bar string
   inbox                   # Output notification inbox for display menu
   inbox-clear             # Clear notification inbox
+
+  # Conductor primitives
+  spawn-task              # New window + claude + prompt (in target session)
+  send-prompt             # Inject prompt into existing claude pane
+  conductor               # Open conductor popup or update its CLAUDE.md marker block
+  conductor-context       # Internal: SessionStart hook emits in-memory instructions
+  conductor-prompt-context # Internal: UserPromptSubmit hook emits fresh pane snapshot
+  list --json             # Same listing as `list`, plus per-pane git context
 
   # Management commands
   install                 # Install tmux/claude plugins
@@ -135,9 +144,30 @@ each other.
 - Uses `terminal-notifier` if installed (external dep, not required)
 - Falls back to AppleScript `display notification` (no click action)
 
+### Conductor
+See `cli.py:cmd_conductor()`, `cli.py:cmd_conductor_context()`, `cli.py:cmd_conductor_prompt_context()`, `tmux.py:spawn_window()`, `send_prompt_to_pane()`, `resolve_conductor_dir()`, `install.py:update_conductor_instructions()`.
+- **Opt-in**: disabled by default. Enable with `tmux set -g @hop-conductor-enabled on` (also `1`/`true`/`yes`). While off, no keybinding registers and `conductor --popup` refuses with a hint. `--update-instructions`, `list --json`, `spawn-task`, `send-prompt`, `conductor-context`, `conductor-prompt-context` work regardless — they are general primitives, not conductor-gated.
+- **Ephemeral popup model**: every popup invocation runs a fresh `cd <workbench> && claude [--continue]` in a `display-popup -E -w 80% -h 80%`. There is no persistent conductor tmux session — closing the popup ends that claude process. State the user wants to carry between sessions lives as files in the workbench dir and as claude's own transcript history (resumable via the continue key).
+- Workbench dir = `@hop-conductor-dir` (default `~/.config/claude-tmux-hop/conductor/`, supports `~` and `$VAR` expansion). The user owns this directory entirely. `ensure_conductor_dir()` only creates the dir — **no CLAUDE.md is seeded**.
+- **Plugin-managed instructions live behind a marker.** The canonical 4-mode dispatch table + safety rules + orchestration patterns are kept in `install.py:CONDUCTOR_INSTRUCTIONS` wrapped by `<conductor-instructions>` / `</conductor-instructions>` XML tags. Inside the block = plugin-owned (replaced by `--update-instructions`). Outside the block = user-owned (preserved across updates).
+- **SessionStart hook injects in-memory** when the workbench has no marker. `cmd_conductor_context()` runs on every Claude SessionStart but no-ops unless cwd == workbench AND `CLAUDE.md` lacks the marker. When it does fire, it emits `additionalContext` (model-only, the canonical instructions) plus `systemMessage` (user-only, hint to run `--update-instructions` to persist). If the marker is already in `CLAUDE.md`, no-op — claude reads it as cwd context naturally.
+- **UserPromptSubmit hook injects fresh snapshot** every turn. `cmd_conductor_prompt_context()` runs on every Claude UserPromptSubmit but no-ops unless cwd == workbench. When it fires, it emits `additionalContext` (model-only) containing the same JSON shape as `list --json` (pane id, state, cwd, branch, worktree_root, project, ai-title `task`, etc.) so the conductor model never has to manually call `hop-status` or `list --json` per turn. The hook is defensive — any error (no tmux, unreadable options) is swallowed silently.
+- **`CLAUDE_TMUX_HOP_CONDUCTOR=1` env var is the fast-path gate.** Popup launch exports it; the two conductor-related hook commands in `hooks/hooks.json` are wrapped as `[ "$CLAUDE_TMUX_HOP_CONDUCTOR" = 1 ] && ... || true` so non-conductor Claude sessions skip the Python interpreter entirely (~108ms saved per prompt per session in our benchmarks). The cwd check inside the CLI handlers remains as a second guard for the edge case of someone exporting the var manually outside a popup.
+- `@hop-conductor-popup-key` (default `y`): fresh popup (prefix-key binding).
+- `@hop-conductor-continue-key` (default `Y`): same popup with `claude --continue`, resuming the prior conductor transcript. Useful for iterating on the same dispatch without losing context.
+- `@hop-conductor-session` (default `conductor`): a *reserved session name* — any tmux session with this name is filtered out of `get_hop_panes()`, `get_claude_panes_by_process()`, and `inbox.record()` so it never pollutes cycle/picker/discover/inbox. This is a safety filter for users who do still want to keep a persistent conductor-style session by that name; the plugin itself does not create one.
+- Subcommands:
+  - `conductor --popup [--continue] | --update-instructions [--force]` — open the popup (optionally resuming) or refresh the plugin-managed marker block in the workbench `CLAUDE.md`. `--force` is required if `CLAUDE.md` exists without a marker; it backs up the file to `CLAUDE.md.bak` before overwriting.
+  - `conductor-context` — internal, invoked by SessionStart hook.
+  - `conductor-prompt-context` — internal, invoked by UserPromptSubmit hook; emits fresh pane snapshot when cwd == workbench.
+  - `list --json` — situational awareness (state + git context for each pane).
+  - `spawn-task --session --cwd --prompt [--window-name] [--no-switch]` — new window + new claude + prompt; creates session if missing.
+  - `send-prompt --pane --prompt [--no-switch] [--force]` — inject prompt into an existing claude pane. **CLI refuses `active` panes** unless `--force`.
+- Four dispatch modes the conductor picks among per task: (a) navigate via `switch`, (b) inject via `send-prompt`, (c) new window in project root via `spawn-task`, (d) new worktree (conductor runs `git worktree add` itself) then `spawn-task`. The conductor's instructions describe *which mode to pick*; the actual CLI shape for each mode lives in the `hop-dispatch` skill so flag changes only need to land in one place. The on-disk CONDUCTOR_INSTRUCTIONS marker block can go stale across plugin updates — the dispatch logic still works (skills travel with the binary) but the user is responsible for running `hop-config`'s "update conductor instructions" to refresh the descriptive copy.
+
 ### Hook Flow (hooks.json)
-- SessionStart (startup|resume) → idle
-- UserPromptSubmit → active
+- SessionStart (startup|resume) → idle + `conductor-context` (in-memory instruction inject when needed)
+- UserPromptSubmit → active + `conductor-prompt-context` (fresh pane snapshot when in workbench)
 - PreToolUse (AskUserQuestion|ExitPlanMode) → waiting
 - PostToolUse / PostToolUseFailure (AskUserQuestion|ExitPlanMode) → active
 - Notification (permission_prompt|elicitation_dialog) → waiting

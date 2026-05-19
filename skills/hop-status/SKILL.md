@@ -41,3 +41,18 @@ Do **not** trigger for general tmux pane listing, for switching panes (the plugi
 - Do not invoke `cycle`, `switch`, `back`, or any pane-mutating command. This skill is read-only.
 - Do not parse `picker-data` — its format is for fzf, not for humans.
 - `list` already filters out panes where Claude Code is no longer running (it inspects live processes), and flips stale `waiting` panes to `idle` if their dialog is gone. You can trust the result without calling `prune`.
+
+## Structured form (for automated callers)
+
+When a caller needs the raw fields (the conductor agent picking a dispatch target, a script, etc.) — not a human-friendly summary — run `claude-tmux-hop list --json` instead. It emits an array of objects with these keys per pane:
+
+- `id` — tmux pane id (`%N`)
+- `state` — `waiting` / `idle` / `active`
+- `timestamp` — epoch seconds when the state was last set (0 if unknown)
+- `session`, `window`, `project` — tmux location + project basename
+- `cwd` — the pane's working directory
+- `branch` — current git branch in `cwd` (empty when not a repo or detached)
+- `worktree_root` — git worktree root for `cwd` (same as `cwd` for non-worktree checkouts; empty when not a repo)
+- `task` — Claude-Code `ai-title` summary if available, else empty
+
+This is the authoritative shape — prefer it over re-deriving fields from the human-readable `list` output.

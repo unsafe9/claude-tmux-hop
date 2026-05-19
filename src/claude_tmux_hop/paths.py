@@ -15,6 +15,11 @@ def get_xdg_config_home() -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
 
 
+def get_default_conductor_dir() -> Path:
+    """Default conductor workbench dir under XDG_CONFIG_HOME."""
+    return get_xdg_config_home() / "claude-tmux-hop" / "conductor"
+
+
 def get_tmux_config_paths() -> list[Path]:
     """Return all possible tmux config file paths in priority order.
 

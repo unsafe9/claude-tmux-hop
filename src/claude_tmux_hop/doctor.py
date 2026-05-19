@@ -130,6 +130,31 @@ def check_claude_plugin() -> CheckResult:
         return CheckResult("claude-plugin", False, message="Command timed out", required=False)
 
 
+def check_conductor_dir() -> CheckResult:
+    """Verify the conductor workbench directory is seeded (informational)."""
+    # Lazy import keeps doctor importable when tmux isn't available.
+    from .tmux import resolve_conductor_dir
+
+    try:
+        d = resolve_conductor_dir()
+    except Exception as e:
+        return CheckResult(
+            "conductor-dir",
+            False,
+            message=f"resolve failed: {e}",
+            required=False,
+        )
+
+    if (d / "CLAUDE.md").exists():
+        return CheckResult("conductor-dir", True, message=str(d), required=False)
+    return CheckResult(
+        "conductor-dir",
+        False,
+        message=f"Not initialized at {d} (run any conductor command to create)",
+        required=False,
+    )
+
+
 def check_tmux_plugin() -> CheckResult:
     """Check if tmux plugin is installed."""
     # Check plugin directory (supports XDG, custom paths, traditional)
@@ -155,6 +180,7 @@ def run_all_checks() -> list[CheckResult]:
         check_fzf(),
         check_tmux_plugin(),
         check_claude_plugin(),
+        check_conductor_dir(),
     ]
 
 

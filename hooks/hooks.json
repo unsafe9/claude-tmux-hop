@@ -8,6 +8,10 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle"
+          },
+          {
+            "type": "command",
+            "command": "[ \"$CLAUDE_TMUX_HOP_CONDUCTOR\" = 1 ] && ${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop conductor-context || true"
           }
         ]
       }
@@ -18,6 +22,10 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
+          },
+          {
+            "type": "command",
+            "command": "[ \"$CLAUDE_TMUX_HOP_CONDUCTOR\" = 1 ] && ${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop conductor-prompt-context || true"
           }
         ]
       }

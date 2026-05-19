@@ -44,7 +44,15 @@ def record(
     (e.g. active) the pane's prior entry is dropped — the user has
     attended to it, so leaving a stale waiting/idle record would skew
     priority cycling toward panes that aren't actually pending.
+
+    The conductor session never lands in the inbox — its claude TUI is
+    the user's command surface, not a tracked task. Function-local import
+    avoids a tmux↔inbox cycle.
     """
+    from .tmux import _get_conductor_session
+    if session == _get_conductor_session():
+        return
+
     if state not in INBOX_STATES:
         remove_pane(pane_id)
         return

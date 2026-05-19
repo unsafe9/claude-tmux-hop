@@ -18,19 +18,24 @@ from .notify import PaneContext, handle_state_notifications
 from .parser import create_parser
 from .priority import STATE_PRIORITY, group_by_state, sort_all_panes
 from .tmux import (
+    _is_conductor_enabled,
     clear_pane_state,
     get_claude_panes_by_process,
     get_current_pane,
     get_current_session_window,
+    get_git_context,
     get_global_option,
     get_hop_panes,
     get_stale_panes,
     has_hop_state,
     is_in_tmux,
     parse_state_set,
+    resolve_conductor_dir,
     run_tmux,
+    send_prompt_to_pane,
     set_pane_state,
     set_pane_task,
+    spawn_window,
     switch_to_pane,
     validate_waiting_panes,
 )
@@ -541,19 +546,52 @@ def cmd_switch(args: argparse.Namespace) -> int:
     return 0 if success else 1
 
 
+def _build_pane_records() -> list[dict]:
+    """Build the JSON-shaped pane snapshot shared by `list --json` and the
+    conductor's per-prompt context hook. Sort + waiting-staleness handling is
+    already applied here so both callers get the same view.
+
+    Callers are responsible for ensuring tmux is reachable — `get_hop_panes()`
+    surfaces tmux errors naturally if it isn't.
+    """
+    panes = get_hop_panes()
+    validate_waiting_panes(panes)
+    sorted_panes = sort_all_panes(panes)
+    return [
+        {
+            "id": pane.id,
+            "state": pane.state,
+            "timestamp": pane.timestamp,
+            "cwd": pane.cwd,
+            "session": pane.session,
+            "window": pane.window,
+            "project": pane.project,
+            **get_git_context(pane.cwd),
+            "task": pane.task,
+        }
+        for pane in sorted_panes
+    ]
+
+
 @requires_tmux(silent=False)
 def cmd_list(args: argparse.Namespace) -> int:
     """List all Claude Code panes with their state."""
-    log_cli_call("list")
+    log_cli_call("list", {"json": bool(getattr(args, "json", False))})
+
+    if getattr(args, "json", False):
+        print(json.dumps(_build_pane_records(), indent=2))
+        return 0
+
     panes = get_hop_panes()
     validate_waiting_panes(panes)
+    sorted_panes = sort_all_panes(panes)
+
     if not panes:
         log_info("list: no panes found")
         print("No Claude Code sessions found")
         return 0
 
     log_info(f"list: found {len(panes)} panes")
-    sorted_panes = sort_all_panes(panes)
 
     for pane in sorted_panes:
         ts = datetime.fromtimestamp(pane.timestamp).strftime("%H:%M:%S") if pane.timestamp else "——:——:——"
@@ -829,6 +867,235 @@ def cmd_update(args: argparse.Namespace) -> int:
     return 0 if success else 1
 
 
+@requires_tmux(silent=False)
+def cmd_spawn_task(args: argparse.Namespace) -> int:
+    """Open a new tmux window running claude with a pre-submitted prompt."""
+    log_cli_call("spawn-task", {
+        "session": args.session,
+        "cwd": args.cwd,
+        "switch": args.switch,
+        "window_name": args.window_name or "",
+    })
+
+    cwd = Path(args.cwd).expanduser()
+    if not cwd.is_dir():
+        print(f"Error: cwd does not exist: {cwd}", file=sys.stderr)
+        return 1
+
+    window_id = spawn_window(
+        session=args.session,
+        cwd=str(cwd),
+        prompt=args.prompt,
+        window_name=args.window_name,
+        switch=args.switch,
+    )
+    print(window_id)
+    return 0
+
+
+@requires_tmux(silent=False)
+def cmd_send_prompt(args: argparse.Namespace) -> int:
+    """Inject a prompt into an existing claude pane."""
+    log_cli_call("send-prompt", {
+        "pane": args.pane,
+        "switch": args.switch,
+        "force": args.force,
+    })
+
+    # Active-pane safety: refuse unless --force.
+    pane_state = run_tmux(
+        "show-option", "-pqv", "-t", args.pane, "@hop-state", check=False
+    ).strip()
+    if pane_state == "active" and not args.force:
+        print(
+            f"refusing: pane {args.pane} is active. use --force to override.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Verify the pane exists (display-message returns empty for unknown panes).
+    probe = run_tmux(
+        "display-message", "-p", "-t", args.pane, "#{pane_id}", check=False
+    ).strip()
+    if not probe:
+        print(f"Error: pane {args.pane} not found", file=sys.stderr)
+        return 1
+
+    send_prompt_to_pane(args.pane, args.prompt, switch=args.switch)
+    return 0
+
+
+def cmd_conductor(args: argparse.Namespace) -> int:
+    """Open the conductor popup, or refresh the workbench CLAUDE.md.
+
+    The popup runs `cd <workbench> && claude [--continue]` directly — no
+    persistent tmux session, no chrome. Each invocation is a fresh claude
+    process; `--continue` resumes the conductor's own prior transcript
+    (claude resolves it from the popup cwd).
+    """
+    import shlex
+    from .install import (
+        ConductorInstructionsConflict,
+        ensure_conductor_dir,
+        update_conductor_instructions,
+    )
+
+    log_cli_call("conductor", {"mode": args.mode, "resume": args.resume, "force": args.force})
+    conductor_dir = resolve_conductor_dir()
+
+    if args.mode == "update_instructions":
+        try:
+            result = update_conductor_instructions(conductor_dir, force=args.force)
+        except ConductorInstructionsConflict as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        if result.backup is not None:
+            print(f"backed up existing file to {result.backup}")
+        verb = {
+            "created": "wrote",
+            "replaced": "updated marker block in",
+            "forced": "overwrote",
+        }[result.action]
+        print(f"{verb} {result.target}")
+        return 0
+
+    if not is_in_tmux():
+        print("Error: Not running inside tmux", file=sys.stderr)
+        return 1
+
+    if not _is_conductor_enabled():
+        print(
+            "conductor disabled. enable via: tmux set -g @hop-conductor-enabled on",
+            file=sys.stderr,
+        )
+        return 1
+
+    ensure_conductor_dir(conductor_dir)
+
+    # `claude --continue` exits non-zero when there's no prior transcript
+    # for this cwd, so chain it with a fresh `claude` as a fallback. Caveat:
+    # this also triggers if the user Ctrl+C's out of the resumed session —
+    # they'll land on a fresh claude and need to quit again. Acceptable for
+    # a dispatch popup where Ctrl+C is rare.
+    claude_cmd = "claude --continue || claude" if args.resume else "claude"
+    # Plugin-only users have our bin at ~/.claude/plugins/.../bin (not on PATH),
+    # so the popup's shell can't find `claude-tmux-hop` for in-popup tooling
+    # (hop-config skill, etc.). Prepend our bin dir — pip users already have it
+    # on PATH and a redundant prepend is harmless.
+    own_bin = shlex.quote(str(Path(sys.argv[0]).resolve().parent))
+    # `CLAUDE_TMUX_HOP_CONDUCTOR=1` lets the SessionStart/UserPromptSubmit
+    # hooks short-circuit in the shell — non-conductor Claude sessions skip
+    # the Python interpreter entirely (~50ms saved per prompt per session).
+    # The CLI handlers still do their own cwd check as a second guard.
+    popup_cmd = (
+        f"export PATH={own_bin}:$PATH && "
+        f"export CLAUDE_TMUX_HOP_CONDUCTOR=1 && "
+        f"cd {shlex.quote(str(conductor_dir))} && {claude_cmd}"
+    )
+    # display-popup -E propagates the inner shell's exit code; claude can exit
+    # non-zero in normal cases (e.g. user :q-ing out of certain flows). The
+    # popup itself launched fine, so don't treat that as a tmux failure.
+    run_tmux("display-popup", "-E", "-w", "80%", "-h", "80%", popup_cmd, check=False)
+    return 0
+
+
+def cmd_conductor_context(args: argparse.Namespace) -> int:
+    """Emit SessionStart context JSON when cwd is the conductor workbench.
+
+    Invoked by the SessionStart hook. Stays silent (exit 0, no output) for
+    any cwd other than the conductor workbench, so it adds no overhead to
+    regular Claude sessions. When the workbench is fresh or has no marker,
+    injects the plugin-managed instructions via `additionalContext` (model
+    only) and a `systemMessage` (user only) advising how to persist them.
+    """
+    from .install import (
+        CONDUCTOR_INSTRUCTIONS,
+        CONDUCTOR_MARKER_OPEN,
+    )
+
+    workbench = resolve_conductor_dir()
+    try:
+        cwd = Path.cwd().resolve()
+    except OSError:
+        return 0
+
+    try:
+        workbench_resolved = workbench.resolve()
+    except OSError:
+        return 0
+
+    if cwd != workbench_resolved:
+        return 0
+
+    claude_md = workbench / "CLAUDE.md"
+    has_marker = False
+    if claude_md.exists():
+        try:
+            has_marker = CONDUCTOR_MARKER_OPEN in claude_md.read_text()
+        except OSError:
+            has_marker = False
+    if has_marker:
+        return 0
+
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": CONDUCTOR_INSTRUCTIONS,
+            "systemMessage": (
+                "Conductor instructions injected in-memory for this session. "
+                "To persist them in this workbench, exit and run: "
+                "`claude-tmux-hop conductor --update-instructions`"
+            ),
+        }
+    }
+    print(json.dumps(payload))
+    return 0
+
+
+def cmd_conductor_prompt_context(args: argparse.Namespace) -> int:
+    """Emit a fresh pane snapshot on each UserPromptSubmit in the conductor.
+
+    Invoked by the UserPromptSubmit hook. Silent (exit 0, no output) outside
+    the conductor workbench. Inside, injects the JSON pane snapshot as
+    `additionalContext` so the conductor model can pick a dispatch target
+    without needing a manual `list --json` round-trip every turn.
+
+    The hook fires on every UserPromptSubmit across every Claude session in
+    the user's environment — including ones outside tmux. Anything that
+    might raise (missing tmux binary, unreadable options, OS errors during
+    cwd lookup) is swallowed: a crashing hook would just spam the user's UI
+    with no recovery path, and the silent path is functionally identical to
+    "we couldn't tell you were the conductor."
+    """
+    try:
+        workbench = resolve_conductor_dir().resolve()
+        cwd = Path.cwd().resolve()
+    except Exception:
+        return 0
+
+    if cwd != workbench:
+        return 0
+
+    try:
+        records = _build_pane_records()
+    except Exception:
+        return 0
+
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": (
+                "Current Claude Code pane snapshot (auto-injected by the "
+                "conductor's UserPromptSubmit hook; no need to run "
+                "`hop-status` or `list --json` separately this turn):\n"
+                + json.dumps(records, indent=2)
+            ),
+        }
+    }
+    print(json.dumps(payload))
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Check environment and dependencies."""
     from .doctor import format_results, run_all_checks
@@ -873,6 +1140,11 @@ def main() -> int:
         cmd_install=cmd_install,
         cmd_update=cmd_update,
         cmd_doctor=cmd_doctor,
+        cmd_spawn_task=cmd_spawn_task,
+        cmd_send_prompt=cmd_send_prompt,
+        cmd_conductor=cmd_conductor,
+        cmd_conductor_context=cmd_conductor_context,
+        cmd_conductor_prompt_context=cmd_conductor_prompt_context,
     )
     args = parser.parse_args()
     return args.func(args)
