@@ -115,8 +115,13 @@ See `cli.py:should_auto_hop()`, `do_auto_hop()`
 
 ### Notification Inbox
 See `inbox.py`, `cli.py:cmd_inbox()`
-- Records `waiting` and `idle` state changes to `~/.local/state/claude-tmux-hop/inbox.jsonl`
 - `@hop-inbox-key`: keybinding to open inbox display-menu (default: "i")
+- Records `waiting` and `idle` state changes to `~/.local/state/claude-tmux-hop/inbox.jsonl`;
+  git identity is resolved at record time (waiting/idle only — the frequent
+  `active` register skips the git call) via `tmux.py:get_git_identity()`:
+  project = main-repo name (worktree panes don't duplicate the branch in the
+  project column), branch column = branch name, falling back on detached HEAD
+  to the linked worktree's directory name or `@<short-sha>` in the main checkout
 - Max 50 entries stored, displays 20 most recent (priority order: waiting → idle, each group newest first; stale waiting panes auto-flip to idle)
 - Each entry shows state icon, project name, time ago, wait reason (when waiting), task summary; clicking switches to pane
 

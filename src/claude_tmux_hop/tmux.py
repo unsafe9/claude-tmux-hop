@@ -313,9 +313,44 @@ def _run_git(*args: str, cwd: str) -> str:
     return result.stdout.strip()
 
 
+def get_git_branch(cwd: str) -> str:
+    """Return the current git branch for `cwd`, or "" if not in a repo."""
+    return _run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
+
+
+def get_git_identity(cwd: str) -> tuple[str, str]:
+    """Return (ref, main-repo name) for `cwd`.
+
+    `ref` is the branch name. On a detached HEAD it falls back to the linked
+    worktree's directory name (worktrees created straight from HEAD have no
+    branch — the directory is their identity), or "@<short-sha>" in the main
+    checkout. The repo name comes from the parent of the common git dir, so
+    linked-worktree panes resolve to the main repository's name instead of
+    the worktree directory. ("", "") outside a git repo.
+    """
+    out = _run_git("rev-parse", "--abbrev-ref", "HEAD", "--show-toplevel", "--git-common-dir", cwd=cwd)
+    lines = [line.strip() for line in out.splitlines()]
+    if len(lines) < 3:
+        return "", ""
+    branch, toplevel, common_dir = lines[:3]
+    # --git-common-dir may be relative (e.g. ".git" at the repo root)
+    if not os.path.isabs(common_dir):
+        common_dir = os.path.join(cwd, common_dir)
+    main_root = os.path.dirname(os.path.abspath(common_dir))
+    repo = os.path.basename(main_root)
+
+    if branch == "HEAD":  # detached
+        if os.path.realpath(toplevel) != os.path.realpath(main_root):
+            branch = os.path.basename(toplevel)
+        else:
+            sha = _run_git("rev-parse", "--short", "HEAD", cwd=cwd)
+            branch = f"@{sha}" if sha else ""
+    return branch, repo
+
+
 def get_git_context(cwd: str) -> dict[str, str]:
     """Return git branch + worktree root for `cwd`, or {} if not in a repo."""
-    branch = _run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd)
+    branch = get_git_branch(cwd)
     worktree_root = _run_git("rev-parse", "--show-toplevel", cwd=cwd)
     if not branch and not worktree_root:
         return {}

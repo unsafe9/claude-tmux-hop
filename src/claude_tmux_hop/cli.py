@@ -24,6 +24,7 @@ from .tmux import (
     get_current_pane,
     get_current_session_window,
     get_git_context,
+    get_git_identity,
     get_global_option,
     get_hop_panes,
     get_stale_panes,
@@ -410,16 +411,23 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Build pane context for notifications and focus
     pane_context = _build_pane_context(project)
 
-    # Record to notification inbox
+    # Record to notification inbox. Git identity is resolved only for states
+    # the inbox actually stores — the frequent active register skips the git
+    # call. The main-repo name replaces the cwd basename so worktree panes
+    # show "repo + branch" instead of duplicating the branch in both columns.
     if pane_context:
+        branch, repo = (
+            get_git_identity(os.getcwd()) if args.state in inbox.INBOX_STATES else ("", "")
+        )
         inbox.record(
             state=args.state,
-            project=project,
+            project=repo or project,
             pane_id=pane_context.pane_id,
             session=pane_context.session,
             window=pane_context.window,
             task=task,
             reason=reason,
+            branch=branch,
         )
 
     # Focus and auto-hop are independent: app focus is an OS-level action,

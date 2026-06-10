@@ -763,7 +763,7 @@ def test_inbox_entry_task_backcompat() -> list[TestResult]:
             "session": "main",
             "window": 0,
         }) + "\n")
-        # New-format entry: has "task"
+        # New-format entry: has "task" and "branch"
         tmp.write(json.dumps({
             "ts": 1700000010,
             "state": "idle",
@@ -772,6 +772,7 @@ def test_inbox_entry_task_backcompat() -> list[TestResult]:
             "session": "main",
             "window": 0,
             "task": "Some task",
+            "branch": "feature/login",
         }) + "\n")
         tmp.close()
 
@@ -791,6 +792,16 @@ def test_inbox_entry_task_backcompat() -> list[TestResult]:
             "inbox_entry__modern_carries_task",
             modern is not None and modern.task == "Some task",
             f"Modern entry should carry task, got {modern.task if modern else 'MISSING'!r}",
+        ))
+        results.append(TestResult(
+            "inbox_entry__legacy_has_empty_branch",
+            legacy is not None and legacy.branch == "",
+            f"Legacy entry should default branch to '', got {legacy.branch if legacy else 'MISSING'!r}",
+        ))
+        results.append(TestResult(
+            "inbox_entry__modern_carries_branch",
+            modern is not None and modern.branch == "feature/login",
+            f"Modern entry should carry branch, got {modern.branch if modern else 'MISSING'!r}",
         ))
     finally:
         inbox.INBOX_FILE = original_file
@@ -1721,6 +1732,65 @@ def test_notify_dedup_cooldown() -> list[TestResult]:
     return results
 
 
+def test_git_identity() -> list[TestResult]:
+    """`get_git_identity` resolves branch + main-repo name, also from worktrees."""
+    import subprocess
+
+    from .tmux import get_git_identity
+
+    results = []
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        repo = Path(tmpdir) / "myrepo"
+        repo.mkdir()
+        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
+        try:
+            subprocess.run([*git, "init", "-q"], cwd=repo, check=True, capture_output=True)
+            subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"],
+                           cwd=repo, check=True, capture_output=True)
+            subprocess.run([*git, "branch", "-M", "main"], cwd=repo, check=True, capture_output=True)
+            subprocess.run([*git, "worktree", "add", "-b", "feature/x", str(Path(tmpdir) / "wt")],
+                           cwd=repo, check=True, capture_output=True)
+            subprocess.run([*git, "worktree", "add", "--detach", str(Path(tmpdir) / "wt-headonly")],
+                           cwd=repo, check=True, capture_output=True)
+            short_sha = subprocess.run([*git, "rev-parse", "--short", "HEAD"],
+                                       cwd=repo, check=True, capture_output=True,
+                                       text=True).stdout.strip()
+        except (subprocess.SubprocessError, OSError) as e:
+            return [TestResult("git_identity__fixture", False, f"git fixture failed: {e}")]
+
+        results.append(TestResult(
+            "git_identity__main_checkout",
+            get_git_identity(str(repo)) == ("main", "myrepo"),
+            f"Expected ('main', 'myrepo'), got {get_git_identity(str(repo))}",
+        ))
+        results.append(TestResult(
+            "git_identity__linked_worktree_resolves_main_repo",
+            get_git_identity(str(Path(tmpdir) / "wt")) == ("feature/x", "myrepo"),
+            f"Expected ('feature/x', 'myrepo'), got {get_git_identity(str(Path(tmpdir) / 'wt'))}",
+        ))
+        results.append(TestResult(
+            "git_identity__detached_worktree_uses_dir_name",
+            get_git_identity(str(Path(tmpdir) / "wt-headonly")) == ("wt-headonly", "myrepo"),
+            f"Expected ('wt-headonly', 'myrepo'), got {get_git_identity(str(Path(tmpdir) / 'wt-headonly'))}",
+        ))
+
+        subprocess.run([*git, "checkout", "-q", "--detach"], cwd=repo, check=False, capture_output=True)
+        results.append(TestResult(
+            "git_identity__detached_main_uses_short_sha",
+            get_git_identity(str(repo)) == (f"@{short_sha}", "myrepo"),
+            f"Expected ('@{short_sha}', 'myrepo'), got {get_git_identity(str(repo))}",
+        ))
+
+        results.append(TestResult(
+            "git_identity__outside_repo_is_empty",
+            get_git_identity(tempfile.gettempdir()) == ("", ""),
+            f"Expected ('', ''), got {get_git_identity(tempfile.gettempdir())}",
+        ))
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -1735,6 +1805,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_normalize_task())
     all_results.extend(test_extract_task_from_transcript())
     all_results.extend(test_inbox_entry_task_backcompat())
+    all_results.extend(test_git_identity())
     all_results.extend(test_cmd_list_json())
     all_results.extend(test_register_arg_parsing())
     all_results.extend(test_state_icon_from_status_format())
