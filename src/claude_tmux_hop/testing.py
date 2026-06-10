@@ -743,73 +743,6 @@ def test_extract_task_from_transcript() -> list[TestResult]:
     return results
 
 
-def test_inbox_entry_task_backcompat() -> list[TestResult]:
-    """Inbox entries written before the task field existed must still parse."""
-    from . import inbox
-
-    results = []
-
-    original_file = inbox.INBOX_FILE
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
-    )
-    try:
-        # Legacy entry: no "task" key
-        tmp.write(json.dumps({
-            "ts": 1700000000,
-            "state": "waiting",
-            "project": "demo",
-            "pane_id": "%1",
-            "session": "main",
-            "window": 0,
-        }) + "\n")
-        # New-format entry: has "task" and "branch"
-        tmp.write(json.dumps({
-            "ts": 1700000010,
-            "state": "idle",
-            "project": "demo",
-            "pane_id": "%2",
-            "session": "main",
-            "window": 0,
-            "task": "Some task",
-            "branch": "feature/login",
-        }) + "\n")
-        tmp.close()
-
-        inbox.INBOX_FILE = Path(tmp.name)
-        entries = inbox.get_entries(limit=10)
-
-        by_pane = {e.pane_id: e for e in entries}
-        legacy = by_pane.get("%1")
-        modern = by_pane.get("%2")
-
-        results.append(TestResult(
-            "inbox_entry__legacy_has_empty_task",
-            legacy is not None and legacy.task == "",
-            f"Legacy entry should default task to '', got {legacy.task if legacy else 'MISSING'!r}",
-        ))
-        results.append(TestResult(
-            "inbox_entry__modern_carries_task",
-            modern is not None and modern.task == "Some task",
-            f"Modern entry should carry task, got {modern.task if modern else 'MISSING'!r}",
-        ))
-        results.append(TestResult(
-            "inbox_entry__legacy_has_empty_branch",
-            legacy is not None and legacy.branch == "",
-            f"Legacy entry should default branch to '', got {legacy.branch if legacy else 'MISSING'!r}",
-        ))
-        results.append(TestResult(
-            "inbox_entry__modern_carries_branch",
-            modern is not None and modern.branch == "feature/login",
-            f"Modern entry should carry branch, got {modern.branch if modern else 'MISSING'!r}",
-        ))
-    finally:
-        inbox.INBOX_FILE = original_file
-        Path(tmp.name).unlink(missing_ok=True)
-
-    return results
-
-
 def test_cmd_list_json() -> list[TestResult]:
     """`list --json` emits a structured row per pane with git context."""
     from . import cli
@@ -1477,54 +1410,6 @@ def test_conductor_session_excluded() -> list[TestResult]:
     return results
 
 
-def test_inbox_skips_conductor() -> list[TestResult]:
-    """`inbox.record()` early-returns for conductor-session state changes."""
-    from . import inbox, tmux
-
-    results = []
-
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
-    )
-    tmp.close()
-    original_file = inbox.INBOX_FILE
-    original_session = tmux._get_conductor_session
-
-    try:
-        inbox.INBOX_FILE = Path(tmp.name)
-        Path(tmp.name).unlink(missing_ok=True)
-        tmux._get_conductor_session = lambda: "conductor"
-
-        inbox.record(
-            state="waiting", project="x", pane_id="%9",
-            session="conductor", window=0,
-        )
-
-        results.append(TestResult(
-            "inbox_skips_conductor__no_file_written",
-            not inbox.INBOX_FILE.exists(),
-            f"Expected no inbox file, got existing={inbox.INBOX_FILE.exists()}",
-        ))
-
-        # Verify a non-conductor session still records.
-        inbox.record(
-            state="waiting", project="y", pane_id="%5",
-            session="main", window=2,
-        )
-        entries = inbox.get_entries()
-        results.append(TestResult(
-            "inbox_skips_conductor__main_session_recorded",
-            len(entries) == 1 and entries[0].pane_id == "%5",
-            f"Expected one entry for %5, got {entries!r}",
-        ))
-    finally:
-        inbox.INBOX_FILE = original_file
-        tmux._get_conductor_session = original_session
-        Path(tmp.name).unlink(missing_ok=True)
-
-    return results
-
-
 def test_spawn_window_session_target_disambiguation() -> list[TestResult]:
     """`spawn_window` must target sessions as `name:` to avoid window-name collisions.
 
@@ -1796,7 +1681,7 @@ def test_inbox_lines_alignment() -> list[TestResult]:
     import time
 
     from . import cli
-    from .inbox import InboxEntry
+    from .tmux import PaneInfo
 
     results = []
     now = int(time.time())
@@ -1807,15 +1692,15 @@ def test_inbox_lines_alignment() -> list[TestResult]:
     cli.get_global_option = lambda name, default="": default
     try:
         entries = [
-            InboxEntry(
-                timestamp=now - 300, state="waiting", project="proj",
-                pane_id="%1", session="main", window=1,
-                task="fix bug", reason="question", branch="feature/login",
+            PaneInfo(
+                id="%1", state="waiting", timestamp=now - 300, cwd="/repo/proj",
+                session="main", window=1, task="fix bug", wait_reason="question",
+                repo="proj", branch="feature/login",
             ),
-            InboxEntry(
-                timestamp=now - 300, state="idle", project="longer-project",
-                pane_id="%2", session="work", window=12,
-                task="do stuff", reason="", branch="hotfix/x",
+            PaneInfo(
+                id="%2", state="idle", timestamp=now - 300, cwd="/repo/longer-project",
+                session="work", window=12, task="do stuff", wait_reason="",
+                repo="longer-project", branch="hotfix/x",
             ),
         ]
         lines = cli._format_inbox_lines(entries)
@@ -1853,9 +1738,9 @@ def test_inbox_lines_alignment() -> list[TestResult]:
         ))
 
         # A column empty across all entries is dropped entirely.
-        single = [InboxEntry(
-            timestamp=now - 300, state="idle", project="demo",
-            pane_id="%9", session="work", window=2,
+        single = [PaneInfo(
+            id="%9", state="idle", timestamp=now - 300, cwd="",
+            session="work", window=2, repo="demo",
         )]
         line = cli._format_inbox_lines(single)[0]
         results.append(TestResult(
@@ -1869,11 +1754,29 @@ def test_inbox_lines_alignment() -> list[TestResult]:
     return results
 
 
+def _patch_cmd_inbox_env(cli, panes, running, cleared):
+    """Patch the cli attributes `cmd_inbox` touches; returns the originals."""
+    originals = {
+        name: getattr(cli, name)
+        for name in ("get_hop_panes", "get_running_claude_pane_ids",
+                     "validate_waiting_panes", "clear_pane_state",
+                     "get_global_option", "LEGACY_INBOX_FILE")
+    }
+    cli.get_hop_panes = lambda validate=True: panes
+    cli.get_running_claude_pane_ids = lambda: running
+    cli.validate_waiting_panes = lambda panes: None
+    cli.clear_pane_state = lambda pane_id=None: cleared.append(pane_id)
+    cli.get_global_option = lambda name, default="": default
+    # Keep tests from unlinking the user's real legacy jsonl.
+    cli.LEGACY_INBOX_FILE = Path(tempfile.gettempdir()) / "hop-test-legacy-inbox.jsonl"
+    return originals
+
+
 def test_self_heal_ps_failure() -> list[TestResult]:
-    """A failed process scan (None) must not mass-prune live sessions."""
+    """A failed process scan (None) must not mass-clear live sessions."""
     import time
 
-    from . import cli, inbox, tmux
+    from . import cli, tmux
     from .tmux import PaneInfo
 
     results = []
@@ -1891,42 +1794,24 @@ def test_self_heal_ps_failure() -> list[TestResult]:
     finally:
         tmux.get_running_claude_pane_ids = original_running
 
-    # cmd_inbox: gone panes still prune via tmux state; killed-claude
-    # candidates are kept (can't be judged without ps).
-    original_file = inbox.INBOX_FILE
-    originals = {
-        name: getattr(cli, name)
-        for name in ("get_hop_panes", "get_running_claude_pane_ids",
-                     "validate_waiting_panes", "clear_pane_state", "get_global_option")
-    }
+    # cmd_inbox: killed-claude candidates can't be judged without ps —
+    # every stateful pane is shown and none gets its state cleared.
     cleared: list[str] = []
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8")
+    panes = [
+        PaneInfo(id="%1", state="idle", timestamp=now - 60, cwd="", session="main", window=0),
+        PaneInfo(id="%3", state="waiting", timestamp=now - 30, cwd="", session="main", window=1),
+    ]
+    originals = _patch_cmd_inbox_env(cli, panes, None, cleared)
     try:
-        for pane_id in ("%1", "%2"):
-            tmp.write(json.dumps({
-                "ts": now - 60, "state": "idle", "project": "demo",
-                "pane_id": pane_id, "session": "main", "window": 0,
-            }, separators=(",", ":")) + "\n")
-        tmp.close()
-        inbox.INBOX_FILE = Path(tmp.name)
-
-        cli.get_hop_panes = lambda validate=True: [
-            PaneInfo(id="%1", state="idle", timestamp=now - 60, cwd="", session="main", window=0),
-        ]
-        cli.get_running_claude_pane_ids = lambda: None
-        cli.validate_waiting_panes = lambda panes: []
-        cli.clear_pane_state = lambda pane_id=None: cleared.append(pane_id)
-        cli.get_global_option = lambda name, default="": default
-
         out = io.StringIO()
         with redirect_stdout(out):
             cli.cmd_inbox(argparse.Namespace(ansi=False))
         lines = [line for line in out.getvalue().splitlines() if line]
 
         results.append(TestResult(
-            "ps_failure__keeps_stateful_pane",
-            len(lines) == 1 and lines[0].endswith("\t%1"),
-            f"Expected %1 kept and %2 (gone pane) pruned, got {lines}",
+            "ps_failure__keeps_all_stateful_panes",
+            len(lines) == 2,
+            f"Expected both panes kept on scan failure, got {lines}",
         ))
         results.append(TestResult(
             "ps_failure__no_state_cleared",
@@ -1934,111 +1819,33 @@ def test_self_heal_ps_failure() -> list[TestResult]:
             f"Expected no clear_pane_state calls, got {cleared}",
         ))
     finally:
-        for name, fn in originals.items():
-            setattr(cli, name, fn)
-        inbox.INBOX_FILE = original_file
-        Path(tmp.name).unlink(missing_ok=True)
-
-    return results
-
-
-def test_inbox_backfill_git_identity() -> list[TestResult]:
-    """Legacy entries (no "branch" key) get upgraded once from the live cwd."""
-    from . import inbox
-
-    results = []
-    original_file = inbox.INBOX_FILE
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8")
-    try:
-        # Legacy: no branch key. Modern: branch key present (must stay as-is).
-        tmp.write(json.dumps({
-            "ts": 1700000000, "state": "idle", "project": "feature-x-worktree",
-            "pane_id": "%1", "session": "main", "window": 0,
-        }, separators=(",", ":")) + "\n")
-        tmp.write(json.dumps({
-            "ts": 1700000010, "state": "idle", "project": "already-new",
-            "pane_id": "%2", "session": "main", "window": 0, "branch": "keep/me",
-        }, separators=(",", ":")) + "\n")
-        tmp.close()
-        inbox.INBOX_FILE = Path(tmp.name)
-
-        calls: list[str] = []
-
-        def resolve(cwd: str) -> tuple[str, str]:
-            calls.append(cwd)
-            return "feature/x", "myrepo"
-
-        changed = inbox.backfill_git_identity({"%1": "/wt/feature-x", "%2": "/repo"}, resolve)
-        by_pane = {e.pane_id: e for e in inbox.get_entries()}
-
-        results.append(TestResult(
-            "inbox_backfill__legacy_upgraded",
-            changed and by_pane["%1"].project == "myrepo" and by_pane["%1"].branch == "feature/x",
-            f"Expected upgraded legacy entry, got {by_pane.get('%1')}",
-        ))
-        results.append(TestResult(
-            "inbox_backfill__modern_untouched",
-            by_pane["%2"].project == "already-new" and by_pane["%2"].branch == "keep/me",
-            f"Modern entry must not be rewritten, got {by_pane.get('%2')}",
-        ))
-        results.append(TestResult(
-            "inbox_backfill__resolves_legacy_only",
-            calls == ["/wt/feature-x"],
-            f"Expected one resolve call for the legacy cwd, got {calls}",
-        ))
-
-        results.append(TestResult(
-            "inbox_backfill__second_run_noop",
-            not inbox.backfill_git_identity({"%1": "/wt/feature-x"}, resolve) and len(calls) == 1,
-            f"Second run must be a no-op, calls={calls}",
-        ))
-    finally:
-        inbox.INBOX_FILE = original_file
-        Path(tmp.name).unlink(missing_ok=True)
+        for name, value in originals.items():
+            setattr(cli, name, value)
 
     return results
 
 
 def test_inbox_self_heal() -> list[TestResult]:
-    """`cmd_inbox` prunes entries for dead panes and stale claude processes."""
+    """`cmd_inbox` clears state for panes whose claude was killed."""
     import time
 
-    from . import cli, inbox
+    from . import cli
     from .tmux import PaneInfo
 
     results = []
     now = int(time.time())
 
-    original_file = inbox.INBOX_FILE
-    originals = {
-        name: getattr(cli, name)
-        for name in ("get_hop_panes", "get_running_claude_pane_ids",
-                     "validate_waiting_panes", "clear_pane_state", "get_global_option")
-    }
+    # %1: live pane + running claude (kept)
+    # %3: pane alive with state but claude killed (cleared + hidden)
+    # Gone panes need no case here — their options vanish with the pane,
+    # so they never appear in get_hop_panes output at all.
     cleared: list[str] = []
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8")
+    panes = [
+        PaneInfo(id="%1", state="idle", timestamp=now - 60, cwd="", session="main", window=0),
+        PaneInfo(id="%3", state="idle", timestamp=now - 60, cwd="", session="main", window=0),
+    ]
+    originals = _patch_cmd_inbox_env(cli, panes, {"%1"}, cleared)
     try:
-        # %1: live pane + running claude (kept)
-        # %2: pane gone entirely (pruned)
-        # %3: pane alive with state but claude killed (pruned + state cleared)
-        for pane_id in ("%1", "%2", "%3"):
-            tmp.write(json.dumps({
-                "ts": now - 60, "state": "idle", "project": "demo",
-                "pane_id": pane_id, "session": "main", "window": 0,
-            }, separators=(",", ":")) + "\n")
-        tmp.close()
-        inbox.INBOX_FILE = Path(tmp.name)
-
-        panes = [
-            PaneInfo(id="%1", state="idle", timestamp=now - 60, cwd="", session="main", window=0),
-            PaneInfo(id="%3", state="idle", timestamp=now - 60, cwd="", session="main", window=0),
-        ]
-        cli.get_hop_panes = lambda validate=True: panes
-        cli.get_running_claude_pane_ids = lambda: {"%1"}
-        cli.validate_waiting_panes = lambda panes: []
-        cli.clear_pane_state = lambda pane_id=None: cleared.append(pane_id)
-        cli.get_global_option = lambda name, default="": default
-
         out = io.StringIO()
         with redirect_stdout(out):
             cli.cmd_inbox(argparse.Namespace(ansi=False))
@@ -2054,17 +1861,124 @@ def test_inbox_self_heal() -> list[TestResult]:
             cleared == ["%3"],
             f"Expected clear_pane_state for %3 only, got {cleared}",
         ))
-        remaining = {e.pane_id for e in inbox.get_entries()}
+    finally:
+        for name, value in originals.items():
+            setattr(cli, name, value)
+
+    return results
+
+
+def test_inbox_identity_backfill() -> list[TestResult]:
+    """`cmd_inbox` resolves + persists git identity for pre-identity panes."""
+    import time
+
+    from . import cli
+    from .tmux import PaneInfo
+
+    results = []
+    now = int(time.time())
+
+    # %1: no identity options yet (pre-0.7 register) → resolved + persisted
+    # %2: identity already stored → untouched
+    cleared: list[str] = []
+    panes = [
+        PaneInfo(id="%1", state="idle", timestamp=now - 60, cwd="/wt/feature-x",
+                 session="s", window=0),
+        PaneInfo(id="%2", state="idle", timestamp=now - 50, cwd="/repo",
+                 session="s", window=1, repo="known", branch="main"),
+    ]
+    resolved: list[str] = []
+    persisted: list[tuple] = []
+    originals = _patch_cmd_inbox_env(cli, panes, {"%1", "%2"}, cleared)
+    original_resolve = cli.get_git_identity
+    original_persist = cli.set_pane_git_identity
+    try:
+        def fake_resolve(cwd):
+            resolved.append(cwd)
+            return "feature/x", "myrepo"
+
+        cli.get_git_identity = fake_resolve
+        cli.set_pane_git_identity = (
+            lambda repo, branch, pane_id=None: persisted.append((repo, branch, pane_id))
+        )
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.cmd_inbox(argparse.Namespace(ansi=False))
+        lines = [line for line in out.getvalue().splitlines() if line]
+
         results.append(TestResult(
-            "inbox_self_heal__rewrites_jsonl",
-            remaining == {"%1"},
-            f"Expected jsonl to contain only %1, got {remaining}",
+            "identity_backfill__resolves_unidentified_only",
+            resolved == ["/wt/feature-x"],
+            f"Expected one resolve for %1's cwd, got {resolved}",
+        ))
+        results.append(TestResult(
+            "identity_backfill__persists_to_pane_options",
+            persisted == [("myrepo", "feature/x", "%1")],
+            f"Expected identity persisted for %1, got {persisted}",
+        ))
+        line1 = next((line for line in lines if line.endswith("\t%1")), "")
+        results.append(TestResult(
+            "identity_backfill__display_uses_resolved_identity",
+            "myrepo" in line1 and "feature/x" in line1,
+            f"Expected resolved identity in %1's row, got {line1!r}",
         ))
     finally:
-        for name, fn in originals.items():
-            setattr(cli, name, fn)
-        inbox.INBOX_FILE = original_file
-        Path(tmp.name).unlink(missing_ok=True)
+        cli.get_git_identity = original_resolve
+        cli.set_pane_git_identity = original_persist
+        for name, value in originals.items():
+            setattr(cli, name, value)
+
+    return results
+
+
+def test_pending_panes() -> list[TestResult]:
+    """`_pending_panes` filters to pending states and honors the dismiss stamp."""
+    import time
+
+    from . import cli
+    from .tmux import PaneInfo
+
+    results = []
+    now = int(time.time())
+
+    panes = [
+        PaneInfo(id="%a", state="active", timestamp=now - 10, cwd="", session="s", window=0),
+        PaneInfo(id="%i", state="idle", timestamp=now - 100, cwd="", session="s", window=1),
+        PaneInfo(id="%w-old", state="waiting", timestamp=now - 200, cwd="", session="s", window=2),
+        PaneInfo(id="%w-new", state="waiting", timestamp=now - 50, cwd="", session="s", window=3),
+    ]
+
+    original_get_global_option = cli.get_global_option
+    try:
+        cli.get_global_option = lambda name, default="": default
+        ids = [p.id for p in cli._pending_panes(panes)]
+        results.append(TestResult(
+            "pending_panes__priority_order_excludes_active",
+            ids == ["%w-new", "%w-old", "%i"],
+            f"Expected waiting (newest first) then idle, got {ids}",
+        ))
+
+        # Dismiss stamp hides panes whose timestamp predates it; a later
+        # state change (newer timestamp) resurfaces the pane.
+        cli.get_global_option = lambda name, default="": str(now - 150)
+        ids = [p.id for p in cli._pending_panes(panes)]
+        results.append(TestResult(
+            "pending_panes__dismiss_stamp_filters",
+            ids == ["%w-new", "%i"],
+            f"Expected %w-old dismissed, got {ids}",
+        ))
+
+        # Unparsable stamp falls back to showing everything.
+        cli.get_global_option = lambda name, default="": "garbage"
+        ids = [p.id for p in cli._pending_panes(panes)]
+        results.append(TestResult(
+            "pending_panes__bad_stamp_ignored",
+            ids == ["%w-new", "%w-old", "%i"],
+            f"Expected full pending list on bad stamp, got {ids}",
+        ))
+    finally:
+        cli.get_global_option = original_get_global_option
 
     return results
 
@@ -2082,12 +1996,12 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_pane_context_resolution())
     all_results.extend(test_normalize_task())
     all_results.extend(test_extract_task_from_transcript())
-    all_results.extend(test_inbox_entry_task_backcompat())
     all_results.extend(test_git_identity())
     all_results.extend(test_inbox_lines_alignment())
     all_results.extend(test_inbox_self_heal())
     all_results.extend(test_self_heal_ps_failure())
-    all_results.extend(test_inbox_backfill_git_identity())
+    all_results.extend(test_inbox_identity_backfill())
+    all_results.extend(test_pending_panes())
     all_results.extend(test_cmd_list_json())
     all_results.extend(test_register_arg_parsing())
     all_results.extend(test_state_icon_from_status_format())
@@ -2100,7 +2014,6 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_conductor_prompt_context())
     all_results.extend(test_send_prompt_blocks_active_pane())
     all_results.extend(test_conductor_session_excluded())
-    all_results.extend(test_inbox_skips_conductor())
     all_results.extend(test_spawn_window_session_target_disambiguation())
     all_results.extend(validate_hooks_json())
 

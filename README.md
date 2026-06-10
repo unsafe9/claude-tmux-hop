@@ -9,7 +9,7 @@ Quickly hop between Claude Code sessions running in tmux panes.
 - **Auto-hop**: Optionally auto-switch to panes when they need attention
 - **System notifications**: Display OS notification when panes need attention (macOS/Linux/Windows)
 - **Terminal focus**: Automatically bring terminal to foreground when panes need attention (macOS/Linux/Windows)
-- **Notification inbox**: Browse recent waiting/idle events in an fzf popup and jump to the pane
+- **Notification inbox**: Browse panes waiting for input or sitting idle in an fzf popup and jump to them
 - **Auto-registration**: Claude Code hooks automatically track pane states, wait reasons, and task summaries
 - **Auto-discovery**: Existing Claude Code sessions are detected on plugin load
 - **In-memory state**: Pane state lives in tmux pane options - auto-cleanup when panes close
@@ -75,9 +75,9 @@ set -g @hop-picker-key 'C-f'
 set -g @hop-back-key 'C-Space'
 
 # Customize notification inbox key (default: i)
-# Opens an fzf popup (display-menu fallback) listing recent waiting/idle state
-# changes as aligned columns (icon, session:window, project, branch, time,
-# wait reason, task); enter switches to that pane, ctrl-x clears the inbox.
+# Opens an fzf popup (display-menu fallback) listing waiting/idle panes as
+# aligned columns (icon, session:window, project, branch, time, wait reason,
+# task); enter switches to that pane, ctrl-x dismisses current notifications.
 set -g @hop-inbox-key 'i'
 
 # Cycle mode (default: priority)
@@ -175,24 +175,26 @@ State is stored directly on tmux panes using custom options:
 - `@hop-timestamp`: Unix timestamp of last state change
 - `@hop-task`: Task summary from Claude Code's session title, shown in picker/list/inbox
 - `@hop-wait-reason`: Why a pane is waiting (question/plan/permission/elicitation), shown in picker/list/inbox
+- `@hop-project` / `@hop-branch`: Git identity (main-repo name, branch), shown in the inbox
 
 Benefits:
 - No external files
 - State auto-deleted when pane closes
 - Fast (in-memory)
+- Single source of truth: status bar, picker, cycle, and inbox all derive
+  from the same pane options, so they can never disagree
 
 ### Notification Inbox
 
-`waiting` and `idle` state changes are recorded to
-`~/.local/state/claude-tmux-hop/inbox.jsonl` so you can review what happened
-while you were elsewhere. `prefix + i` opens an fzf popup (display-menu
-fallback) listing recent entries as aligned columns — state icon,
+`prefix + i` opens an fzf popup (display-menu fallback) listing every pane
+waiting for input or sitting idle, as aligned columns — state icon,
 session:window, project, branch, time ago, wait reason, task summary.
-`enter` jumps to the pane, `ctrl-x` clears the inbox.
+`enter` jumps to the pane, `ctrl-x` dismisses the current entries (panes
+resurface on their next state change; status bar counts are unaffected).
 
-The inbox self-heals on open: entries whose pane is gone or no longer runs
-Claude Code are pruned automatically, so killed panes never leave stale
-notifications behind.
+The listing is derived live from pane state, so it can't go stale: a killed
+pane disappears with its options, and a force-killed Claude process gets its
+leftover pane state cleaned up when the inbox opens.
 
 ## Notifications & Focus
 

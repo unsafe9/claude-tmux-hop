@@ -44,6 +44,8 @@ class PaneInfo:
     window: int  # Window index
     task: str = ""  # One-line task summary (from Claude Code ai-title)
     wait_reason: str = ""  # Why the pane is waiting (question/plan/permission/elicitation)
+    repo: str = ""  # Main-repo name from @hop-project (set on waiting/idle register)
+    branch: str = ""  # Branch from @hop-branch (set on waiting/idle register)
 
     @property
     def project(self) -> str:
@@ -194,6 +196,29 @@ def set_pane_task(task: str, pane_id: str | None = None) -> None:
         run_tmux("set-option", "-p", *target, "-u", "@hop-task", check=False)
 
 
+def set_pane_git_identity(repo: str, branch: str, pane_id: str | None = None) -> None:
+    """Store git identity (@hop-project / @hop-branch) on a pane.
+
+    Empty values unset the option so a pane that moved out of a repo
+    doesn't keep a stale identity. Both writes share one tmux invocation.
+
+    Args:
+        repo: Main-repo name ("" outside a git repo)
+        branch: Branch name ("" outside a git repo)
+        pane_id: The pane ID, or None for current pane
+    """
+    target = _pane_target_args(pane_id)
+    args: list[str] = []
+    for opt, value in (("@hop-project", repo), ("@hop-branch", branch)):
+        if args:
+            args.append(";")
+        if value:
+            args += ["set-option", "-p", *target, opt, value]
+        else:
+            args += ["set-option", "-p", *target, "-u", opt]
+    run_tmux(*args, check=False)
+
+
 def has_hop_state(pane_id: str | None = None) -> bool:
     """Check if a pane has hop state set.
 
@@ -216,7 +241,8 @@ def clear_pane_state(pane_id: str | None = None) -> None:
     """
     target = _pane_target_args(pane_id)
     options = ("@hop-state", "@hop-timestamp", "@hop-task",
-               "@hop-wait-reason", "@hop-last-notify")
+               "@hop-wait-reason", "@hop-last-notify",
+               "@hop-project", "@hop-branch")
     args: list[str] = []
     for opt in options:
         if args:
@@ -627,12 +653,13 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
     conductor_session = _get_conductor_session()
 
     # Query all panes with hop options
-    # Format: pane_id \t state \t timestamp \t cwd \t session \t window \t task \t wait_reason
+    # Format: pane_id \t state \t timestamp \t cwd \t session \t window
+    #         \t task \t wait_reason \t project \t branch
     output = run_tmux(
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}\t#{@hop-state}\t#{@hop-timestamp}\t#{pane_current_path}\t#{session_name}\t#{window_index}\t#{@hop-task}\t#{@hop-wait-reason}",
+        "#{pane_id}\t#{@hop-state}\t#{@hop-timestamp}\t#{pane_current_path}\t#{session_name}\t#{window_index}\t#{@hop-task}\t#{@hop-wait-reason}\t#{@hop-project}\t#{@hop-branch}",
     )
 
     panes = []
@@ -640,13 +667,15 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
         if not line:
             continue
 
-        parts = line.split("\t", maxsplit=7)
+        parts = line.split("\t", maxsplit=9)
         if len(parts) < 6:
             continue
 
         pane_id, state, timestamp_str, cwd, session, window_str = parts[:6]
         task = parts[6] if len(parts) >= 7 else ""
         wait_reason = parts[7] if len(parts) >= 8 else ""
+        repo = parts[8] if len(parts) >= 9 else ""
+        branch = parts[9] if len(parts) >= 10 else ""
 
         # Only include panes with hop state
         if not state:
@@ -677,6 +706,8 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
                 window=window,
                 task=task,
                 wait_reason=wait_reason,
+                repo=repo,
+                branch=branch,
             )
         )
 
@@ -842,14 +873,13 @@ def has_active_dialog(content: str) -> bool:
 def validate_waiting_panes(panes: list[PaneInfo]) -> None:
     """Check stale "waiting" panes and flip to "idle" if dialog is dismissed.
 
-    Mutates panes in-place when a stale waiting pane's dialog is no longer active.
-    Also records the flip to the notification inbox so both views stay in sync.
+    Mutates panes in-place when a stale waiting pane's dialog is no longer
+    active. Pane options are the single source of truth, so the state write
+    alone keeps every view (status bar, inbox, cycle) in sync.
 
     Args:
         panes: List of PaneInfo objects (modified in-place)
     """
-    from . import inbox
-
     now = int(time.time())
 
     for pane in panes:
@@ -874,12 +904,4 @@ def validate_waiting_panes(panes: list[PaneInfo]) -> None:
         pane.state = "idle"
         pane.timestamp = now
         pane.wait_reason = ""
-        inbox.record(
-            state="idle",
-            project=pane.project,
-            pane_id=pane.id,
-            session=pane.session,
-            window=pane.window,
-            task=pane.task,
-        )
         log_info(f"validate: {pane.id} flipped waiting → idle (dialog dismissed)")

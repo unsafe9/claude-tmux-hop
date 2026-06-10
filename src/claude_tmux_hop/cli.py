@@ -12,12 +12,18 @@ from datetime import datetime
 
 from pathlib import Path
 
-from . import inbox
-from .log import log_cli_call, log_debug, log_error, log_info
+from .log import LOG_DIR, log_cli_call, log_debug, log_error, log_info
 from .notify import PaneContext, clear_notification_stamp, handle_state_notifications
 from .parser import create_parser
-from .priority import STATE_PRIORITY, group_by_state, sort_all_panes
+from .priority import (
+    PENDING_STATES,
+    STATE_PRIORITY,
+    group_by_state,
+    priority_sort_key,
+    sort_all_panes,
+)
 from .tmux import (
+    PaneInfo,
     _is_conductor_enabled,
     clear_pane_state,
     get_claude_panes_by_process,
@@ -40,6 +46,8 @@ from .tmux import (
     restore_window_auto_rename,
     run_tmux,
     send_prompt_to_pane,
+    set_global_option,
+    set_pane_git_identity,
     set_pane_state,
     set_pane_task,
     spawn_conductor_session,
@@ -94,7 +102,7 @@ DEFAULT_STATUS_FORMAT = "{waiting:󰂜} {idle:󰄬}"
 STATUS_FORMAT_TOKEN_RE = re.compile(r"\{(\w+):([^}]*)\}")
 
 # Task summary length limits
-MAX_TASK_STORED = 200  # Maximum stored in @hop-task tmux option / inbox jsonl
+MAX_TASK_STORED = 200  # Maximum stored in the @hop-task tmux option
 MAX_TASK_DISPLAY = 50  # Maximum shown in picker / list / hop-status
 MAX_NOTIFY_DETAIL = 100  # Maximum detail length in OS notification body
 
@@ -102,6 +110,17 @@ MAX_NOTIFY_DETAIL = 100  # Maximum detail length in OS notification body
 # edge, so these only bound how far the later columns get pushed right)
 INBOX_COL_MAX = 56
 INBOX_TASK_MAX = 100
+INBOX_DISPLAY_LIMIT = 20
+
+# Global option holding the inbox-clear dismiss stamp: pending panes whose
+# timestamp predates it are hidden from the inbox and cycle until their
+# state changes again. Dismissing is a view filter — pane state (and the
+# status bar counts derived from it) is untouched.
+INBOX_CLEARED_OPTION = "@hop-inbox-cleared-at"
+
+# Pre-0.7 inbox entries lived in this jsonl; pane options are now the single
+# source of truth, so any leftover file is deleted on the next inbox open.
+LEGACY_INBOX_FILE = LOG_DIR / "inbox.jsonl"
 
 # ANSI styles for the fzf inbox popup (--ansi)
 ANSI_RESET = "\033[0m"
@@ -428,24 +447,14 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Build pane context for notifications and focus
     pane_context = _build_pane_context(project)
 
-    # Record to notification inbox. Git identity is resolved only for states
-    # the inbox actually stores — the frequent active register skips the git
-    # call. The main-repo name replaces the cwd basename so worktree panes
-    # show "repo + branch" instead of duplicating the branch in both columns.
-    if pane_context:
-        branch, repo = (
-            get_git_identity(os.getcwd()) if args.state in inbox.INBOX_STATES else ("", "")
-        )
-        inbox.record(
-            state=args.state,
-            project=repo or project,
-            pane_id=pane_context.pane_id,
-            session=pane_context.session,
-            window=pane_context.window,
-            task=task,
-            reason=reason,
-            branch=branch,
-        )
+    # Store git identity as pane options so the inbox/cycle view can derive
+    # everything from pane state. Resolved only for pending states — the
+    # frequent active register skips the git call. The main-repo name (vs the
+    # cwd basename) keeps worktree panes from duplicating the branch in both
+    # the project and branch columns.
+    if args.state in PENDING_STATES:
+        branch, repo = get_git_identity(os.getcwd())
+        set_pane_git_identity(repo, branch)
 
     # Focus and auto-hop are independent: app focus is an OS-level action,
     # tmux pane hopping is a tmux-level action. Both must be free to trigger
@@ -511,31 +520,40 @@ def cmd_clear(args: argparse.Namespace) -> int:
     if is_window_rename_enabled():
         restore_window_auto_rename()
 
-    # Remove from notification inbox
-    pane_id = os.environ.get("TMUX_PANE")
-    if pane_id:
-        inbox.remove_pane(pane_id)
-
     log_info("clear: state cleared")
     return 0
 
 
+def _pending_panes(panes: list[PaneInfo]) -> list[PaneInfo]:
+    """Panes pending the user's attention, in cycle order.
+
+    Filters to PENDING_STATES, drops panes dismissed via inbox-clear (their
+    timestamp predates the @hop-inbox-cleared-at stamp; a later state change
+    resurfaces them), and sorts waiting → idle, newest first within each.
+    """
+    try:
+        cleared_at = int(get_global_option(INBOX_CLEARED_OPTION, "0") or 0)
+    except ValueError:
+        cleared_at = 0
+    pending = [
+        p for p in panes
+        if p.state in PENDING_STATES and p.timestamp > cleared_at
+    ]
+    pending.sort(key=lambda p: priority_sort_key(p.state, p.timestamp))
+    return pending
+
+
 @requires_tmux(silent=False)
 def cmd_cycle(args: argparse.Namespace) -> int:
-    """Cycle to the next pane using the inbox list (priority order)."""
+    """Cycle to the next pending pane (priority order)."""
     log_cli_call("cycle", {"pane": args.pane} if args.pane else None)
 
     hop_panes = get_hop_panes(validate=False)
     validate_waiting_panes(hop_panes)
-    # Reuse the list-panes result for live session/window; inbox entries store
-    # the location at record time and can drift when panes are moved between
-    # windows, which would make tmux land on the wrong window before following
-    # the pane id.
-    live_loc = {p.id: (p.session, p.window) for p in hop_panes}
 
-    entries = inbox.get_entries()
+    entries = _pending_panes(hop_panes)
     if not entries:
-        log_info("cycle: no inbox entries")
+        log_info("cycle: no pending panes")
         run_tmux("display-message", "No notifications")
         return 0
 
@@ -547,7 +565,7 @@ def cmd_cycle(args: argparse.Namespace) -> int:
     # Find current pane and select next
     # Prefer --pane arg (from tmux keybinding), fall back to get_current_pane()
     current = args.pane if args.pane else get_current_pane()
-    ids = [e.pane_id for e in entries]
+    ids = [e.id for e in entries]
 
     try:
         idx = ids.index(current)
@@ -557,12 +575,11 @@ def cmd_cycle(args: argparse.Namespace) -> int:
 
     for _ in range(len(entries)):
         target = entries[next_idx]
-        loc = live_loc.get(target.pane_id)
-        if loc and switch_to_pane(target.pane_id, loc[0], loc[1]):
-            log_info(f"cycle → {target.project} ({target.state}) {target.pane_id}")
+        if switch_to_pane(target.id, target.session, target.window):
+            log_info(f"cycle → {target.project} ({target.state}) {target.id}")
             return 0
-        inbox.remove_pane(target.pane_id)
-        log_info(f"cycle: removed stale {target.pane_id}")
+        # Pane vanished mid-cycle — its options died with it, just skip.
+        log_info(f"cycle: skipped vanished {target.id}")
         entries.pop(next_idx)
         if not entries:
             break
@@ -730,6 +747,10 @@ def cmd_discover(args: argparse.Namespace) -> int:
             print(f"Would register: {pane_id} ({pane['session']}:{pane['window']}) - {project}")
         else:
             set_pane_state("idle", pane_id)
+            # Idle panes surface in the inbox, so give them the same git
+            # identity a real register would (rare one-shot path).
+            branch, repo = get_git_identity(pane["cwd"])
+            set_pane_git_identity(repo, branch, pane_id)
             log_info(f"discover: registered {pane_id} as idle")
             if not args.quiet:
                 print(f"Registered: {pane_id} ({pane['session']}:{pane['window']}) - {project}")
@@ -767,10 +788,8 @@ def cmd_prune(args: argparse.Namespace) -> int:
             if not args.quiet:
                 print(f"Removed: {pane.id} ({pane.session}:{pane.window}) - {pane.project}")
 
-    if not args.dry_run:
-        inbox.remove_panes({pane.id for pane in stale})
-        if not args.quiet:
-            print(f"\nPruned {len(stale)} stale pane(s)")
+    if not args.dry_run and not args.quiet:
+        print(f"\nPruned {len(stale)} stale pane(s)")
 
     return 0
 
@@ -822,8 +841,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def _format_inbox_lines(entries: list[inbox.InboxEntry], use_ansi: bool = False) -> list[str]:
-    """Render inbox entries as aligned columns: "label<TAB>pane_id" lines.
+def _format_inbox_lines(entries: list[PaneInfo], use_ansi: bool = False) -> list[str]:
+    """Render pending panes as aligned columns: "label<TAB>pane_id" lines.
 
     Columns (icon, session:window, project, branch, time, reason, task) are
     padded to the widest cell; columns empty across all entries are dropped.
@@ -835,10 +854,10 @@ def _format_inbox_lines(entries: list[inbox.InboxEntry], use_ansi: bool = False)
         (
             icons[entry.state],
             f"{entry.session}:{entry.window}",
-            _format_task_display(entry.project, INBOX_COL_MAX),
+            _format_task_display(entry.repo or entry.project, INBOX_COL_MAX),
             _format_task_display(entry.branch, INBOX_COL_MAX),
             _format_time_ago(entry.timestamp),
-            entry.reason,
+            entry.wait_reason,
             _format_task_display(entry.task, INBOX_TASK_MAX),
         )
         for entry in entries
@@ -858,48 +877,52 @@ def _format_inbox_lines(entries: list[inbox.InboxEntry], use_ansi: bool = False)
                     padded = f"{style}{padded}{ANSI_RESET}"
             cells.append(padded)
         label = "  ".join(cells).rstrip()
-        lines.append(f"{label}\t{entry.pane_id}")
+        lines.append(f"{label}\t{entry.id}")
     return lines
 
 
 def cmd_inbox(args: argparse.Namespace) -> int:
-    """Output inbox entries for the fzf popup / display menu (internal use).
+    """Output pending panes for the fzf popup / display menu (internal use).
 
-    Outputs one aligned line per entry; --ansi adds per-column colors for fzf.
+    The listing is derived straight from pane options (the single source of
+    truth shared with the status bar and cycle). Outputs one aligned line per
+    pane; --ansi adds per-column colors for fzf.
 
-    Hooks only fire on graceful exits, so killed panes/windows and kill -9'd
-    claude processes leave entries (and pane state) behind forever. Opening
-    the inbox is the natural validation point: entries whose pane is gone or
-    no longer runs claude are pruned here, and stale pane state is cleared.
+    Hooks only fire on graceful exits, so a kill -9'd claude leaves stale
+    state on its still-living pane. Opening the inbox is the natural
+    validation point: such panes get their state cleared here, which also
+    corrects the status bar counts. Gone panes need no handling — their
+    options died with them.
     """
+    LEGACY_INBOX_FILE.unlink(missing_ok=True)
+
     panes = get_hop_panes(validate=False)
     validate_waiting_panes(panes)
 
-    entries = inbox.get_entries()
+    running = get_running_claude_pane_ids()
+    # A failed process scan (None) can't judge killed-claude panes —
+    # show everything over mass-clearing live sessions.
+    if running is not None:
+        dead = [p for p in panes if p.id not in running]
+        for pane in dead:
+            clear_pane_state(pane.id)
+        if dead:
+            log_info(f"inbox: cleared {len(dead)} dead panes")
+            panes = [p for p in panes if p.id in running]
+
+    entries = _pending_panes(panes)[:INBOX_DISPLAY_LIMIT]
     if not entries:
         return 0
 
-    running = get_running_claude_pane_ids()
-    state_ids = {p.id for p in panes}
-    # A failed process scan (None) still prunes gone panes via tmux state,
-    # but can't judge killed-claude panes — keep those over mass-pruning.
-    live_ids = state_ids if running is None else state_ids & running
-    dead_ids = {e.pane_id for e in entries if e.pane_id not in live_ids}
-    if dead_ids:
-        for pane in panes:
-            if pane.id in dead_ids:  # stale state on a live pane (killed claude)
-                clear_pane_state(pane.id)
-        inbox.remove_panes(dead_ids)
-        log_info(f"inbox: pruned {len(dead_ids)} dead entries")
-        entries = [e for e in entries if e.pane_id not in dead_ids]
-        if not entries:
-            return 0
-
-    # Upgrade pre-git-identity entries from their pane's current cwd; reload
-    # so this open already shows the fixed project/branch.
-    cwd_by_pane = {p.id: p.cwd for p in panes if p.id in live_ids}
-    if inbox.backfill_git_identity(cwd_by_pane, get_git_identity):
-        entries = inbox.get_entries()
+    # Panes registered before the git-identity options existed show fallback
+    # columns (cwd basename, blank branch); resolve and persist once here so
+    # long-idle panes don't stay degraded until their next state change.
+    for pane in entries:
+        if not pane.repo and not pane.branch and pane.cwd:
+            branch, repo = get_git_identity(pane.cwd)
+            if repo or branch:
+                set_pane_git_identity(repo, branch, pane.id)
+                pane.repo, pane.branch = repo, branch
 
     for line in _format_inbox_lines(entries, use_ansi=bool(getattr(args, "ansi", False))):
         print(line)
@@ -908,8 +931,12 @@ def cmd_inbox(args: argparse.Namespace) -> int:
 
 
 def cmd_inbox_clear(args: argparse.Namespace) -> int:
-    """Clear all inbox notifications."""
-    inbox.clear()
+    """Dismiss current notifications via the cleared-at stamp.
+
+    Pane state stays untouched — panes resurface in the inbox/cycle on
+    their next state change.
+    """
+    set_global_option(INBOX_CLEARED_OPTION, str(int(time.time())))
     run_tmux("display-message", "Notifications cleared", check=False)
     return 0
 

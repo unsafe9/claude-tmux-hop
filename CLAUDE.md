@@ -22,8 +22,7 @@ src/claude_tmux_hop/
   cli.py          # CLI entry (argparse subcommands)
   parser.py       # CLI argument parser setup (argparse subcommands)
   tmux.py         # Tmux operations, PaneInfo dataclass
-  priority.py     # State priority logic - see STATE_PRIORITY
-  inbox.py        # Notification inbox - JSONL storage in ~/.local/state/claude-tmux-hop/inbox.jsonl
+  priority.py     # State priority logic - see STATE_PRIORITY, PENDING_STATES
   paths.py        # XDG/TPM path detection - see get_tmux_config_paths()
   install.py      # Installation & update logic + environment checks (CheckResult)
   testing.py      # Self-tests - see run_all_tests()
@@ -58,11 +57,16 @@ See `priority.py:STATE_PRIORITY`
 - `active` (2): running - newest first
 
 ### Tmux State Storage
-See `tmux.py:set_pane_state()`, `get_hop_panes()`
-- Uses custom pane options: `@hop-state`, `@hop-timestamp`, `@hop-task`,
+See `tmux.py:set_pane_state()`, `set_pane_git_identity()`, `get_hop_panes()`
+- Pane options are the **single source of truth**: the status bar, picker,
+  cycle, and notification inbox all derive their views from `get_hop_panes()`,
+  so they can never disagree and state dies with the pane (auto-cleanup)
+- Custom pane options: `@hop-state`, `@hop-timestamp`, `@hop-task`,
   `@hop-wait-reason` (question/plan/permission/elicitation — set by hooks via
   `register --reason`, only kept while state is `waiting`), `@hop-last-notify`
-  (notification dedup stamp)
+  (notification dedup stamp), `@hop-project` / `@hop-branch` (git identity,
+  resolved on waiting/idle registers only — the frequent `active` register
+  skips the git call)
 
 ### Window Auto-Rename
 See `tmux.py:rename_window()`, `is_window_rename_enabled()`, `cli.py:cmd_register()`, `_get_state_icon()`
@@ -88,26 +92,27 @@ See `cli.py:should_auto_hop()`, `do_auto_hop()`
 - `@hop-auto-priority-only`: only hop if highest priority (default: "on")
 
 ### Notification Inbox
-See `inbox.py`, `cli.py:cmd_inbox()`, `_format_inbox_lines()`
-- Records `waiting` and `idle` state changes to `~/.local/state/claude-tmux-hop/inbox.jsonl`;
-  git identity is resolved at record time (waiting/idle only — the frequent
-  `active` register skips the git call) via `tmux.py:get_git_identity()`:
-  project = main-repo name (worktree panes don't duplicate the branch in the
-  project column), branch column = branch name, falling back on detached HEAD
-  to the linked worktree's directory name or `@<short-sha>` in the main checkout
+See `cli.py:_pending_panes()`, `cmd_inbox()`, `cmd_inbox_clear()`, `_format_inbox_lines()`
+- A **view over pane options**, not a store: panes in `PENDING_STATES`
+  (waiting/idle), priority order (waiting → idle, each group newest first;
+  stale waiting panes auto-flip to idle), top 20 shown. Cycle uses the same
+  `_pending_panes()` view. Project column = `@hop-project` (main-repo name —
+  worktree panes don't duplicate the branch in the project column) falling
+  back to the cwd basename; branch column = `@hop-branch`, falling back on
+  detached HEAD to the linked worktree's directory name or `@<short-sha>`
+  in the main checkout
 - `@hop-inbox-key` (default: "i"): opens an fzf popup (enter: jump, ctrl-x:
   clear all) with display-menu fallback when fzf/popup is unavailable
-- Max 50 entries stored, displays 20 most recent (priority order: waiting → idle, each group newest first; stale waiting panes auto-flip to idle)
-- Self-heal on read: hooks only fire on graceful exits, so killed panes/windows
-  and kill -9'd claude processes leave entries behind. `cmd_inbox()` prunes
-  entries whose pane is gone or no longer runs claude (clearing stale pane
-  state too); `prune` also removes inbox entries alongside pane state. No
-  periodic scan needed — opening the inbox is the validation point. A failed
-  process scan (`get_running_claude_pane_ids()` → None) only prunes gone panes,
-  never killed-claude candidates
-- Legacy entries (recorded before git identity existed, no "branch" key) are
-  upgraded in place on read via `inbox.backfill_git_identity()` from each
-  pane's current cwd — one git call per legacy entry ever
+- ctrl-x sets the `@hop-inbox-cleared-at` global stamp — a view filter, not a
+  state change: panes whose timestamp predates it are hidden from inbox/cycle
+  until their next state change; status bar counts are untouched
+- Self-heal on open: hooks only fire on graceful exits, so a kill -9'd claude
+  leaves stale state on its still-living pane. `cmd_inbox()` clears such
+  panes' state (which also corrects the status bar). Gone panes need nothing —
+  their options died with them. A failed process scan
+  (`get_running_claude_pane_ids()` → None) shows everything rather than
+  mass-clearing live sessions. Pre-0.7 `inbox.jsonl` leftovers are deleted on
+  open
 - Entries render as aligned columns — state icon (honors `@hop-status-format`),
   session:window, project, branch, time ago, wait reason, task summary —
   padded to the widest cell; columns empty across all entries are dropped.

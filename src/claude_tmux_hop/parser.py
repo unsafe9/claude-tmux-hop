@@ -213,7 +213,7 @@ def create_parser(
     # inbox-clear command
     inbox_clear_parser = subparsers.add_parser(
         "inbox-clear",
-        help="Clear notification inbox",
+        help="Dismiss current notifications (panes resurface on next state change)",
     )
     inbox_clear_parser.set_defaults(func=cmd_inbox_clear)
 
