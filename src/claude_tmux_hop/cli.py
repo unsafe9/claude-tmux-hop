@@ -14,7 +14,7 @@ from pathlib import Path
 
 from . import inbox
 from .log import log_cli_call, log_debug, log_error, log_info
-from .notify import PaneContext, handle_state_notifications
+from .notify import PaneContext, clear_notification_stamp, handle_state_notifications
 from .parser import create_parser
 from .priority import STATE_PRIORITY, group_by_state, sort_all_panes
 from .tmux import (
@@ -87,6 +87,7 @@ DEFAULT_STATUS_FORMAT = "{waiting:󰂜} {idle:󰄬}"
 # Task summary length limits
 MAX_TASK_STORED = 200  # Maximum stored in @hop-task tmux option / inbox jsonl
 MAX_TASK_DISPLAY = 50  # Maximum shown in picker / list / hop-status
+MAX_NOTIFY_DETAIL = 100  # Maximum detail length in OS notification body
 
 # How many bytes of the transcript tail to scan for the latest ai-title.
 # Claude Code regenerates ai-title each user turn; the most recent one is
@@ -361,9 +362,13 @@ def cmd_register(args: argparse.Namespace) -> int:
     set_pane_state(args.state, reason=reason)
     log_info(f"register: state set to {args.state}")
 
+    # Hook payload is consumed once here: task resolution and the
+    # notification detail both read from it.
+    payload = _read_hook_stdin()
+
     # Refresh the per-pane task summary. Manual --task wins over the hook
     # payload so callers can override the auto-derived value when testing.
-    task = _resolve_task_for_register(args)
+    task = _resolve_task_for_register(args, payload)
     if task:
         try:
             set_pane_task(task)
@@ -373,6 +378,11 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     # Get project name for notifications
     project = os.path.basename(os.getcwd())
+
+    # A new user turn resets notification dedup so the next waiting/idle
+    # event for this pane always notifies fresh.
+    if args.state == "active":
+        clear_notification_stamp()
 
     # Build pane context for notifications and focus
     pane_context = _build_pane_context(project)
@@ -393,7 +403,8 @@ def cmd_register(args: argparse.Namespace) -> int:
     # tmux pane hopping is a tmux-level action. Both must be free to trigger
     # on the same event — e.g. user is already on the terminal but a
     # different pane needs to come to the front.
-    handle_state_notifications(args.state, project, pane_context)
+    detail = _notify_detail(args.state, payload, task)
+    handle_state_notifications(args.state, project, pane_context, detail)
 
     if should_auto_hop(args.state):
         do_auto_hop(pane_context)
@@ -401,7 +412,7 @@ def cmd_register(args: argparse.Namespace) -> int:
     return 0
 
 
-def _resolve_task_for_register(args: argparse.Namespace) -> str:
+def _resolve_task_for_register(args: argparse.Namespace, payload: dict | None) -> str:
     """Pick the task summary to store for this register call.
 
     Order: explicit --task arg > transcript ai-title/last-prompt from hook stdin > "".
@@ -410,13 +421,36 @@ def _resolve_task_for_register(args: argparse.Namespace) -> str:
     if override:
         return _normalize_task(override)
 
-    payload = _read_hook_stdin()
     if not payload:
         return ""
     transcript_path = payload.get("transcript_path")
     if not transcript_path:
         return ""
     return _extract_task_from_transcript(transcript_path)
+
+
+def _notify_detail(state: str, payload: dict | None, task: str) -> str:
+    """Pick the most informative one-liner for the OS notification body.
+
+    waiting: the Notification hook's message (e.g. "Claude needs your
+    permission to use Bash") or the pending AskUserQuestion text;
+    idle: the task summary. "" falls back to the plain "project: state" body.
+    """
+    detail = ""
+    if payload:
+        event = payload.get("hook_event_name", "")
+        if event == "Notification":
+            message = payload.get("message")
+            detail = message if isinstance(message, str) else ""
+        elif event == "PreToolUse" and payload.get("tool_name") == "AskUserQuestion":
+            tool_input = payload.get("tool_input")
+            questions = tool_input.get("questions") if isinstance(tool_input, dict) else None
+            if isinstance(questions, list) and questions and isinstance(questions[0], dict):
+                question = questions[0].get("question")
+                detail = question if isinstance(question, str) else ""
+    if not detail and state == "idle":
+        detail = task
+    return _format_task_display(_normalize_task(detail), MAX_NOTIFY_DETAIL)
 
 
 @requires_tmux(silent=True)

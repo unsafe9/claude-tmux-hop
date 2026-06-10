@@ -127,9 +127,15 @@ Cross-platform notification and terminal focus using Strategy pattern:
 **Flow in `cmd_register()`:**
 1. Build `PaneContext` from current pane (pane_id, session, window, project)
 2. Record to notification inbox (waiting/idle only)
-3. Call `handle_state_notifications(state, project, pane_context)`:
+3. Call `handle_state_notifications(state, project, pane_context, detail)`:
    - If `@hop-focus-app` matches: focus terminal app/tab only (OS-level)
    - If `@hop-notify` matches and terminal not focused: send OS notification
+   - `detail` enriches the body (`cli.py:_notify_detail()`): the Notification
+     hook's `message` (permission prompt text), the pending AskUserQuestion
+     text, or the task summary on idle
+   - Dedup: identical bodies for the same pane are suppressed within
+     `NOTIFY_COOLDOWN_SECONDS` (120s) via the `@hop-last-notify` pane option;
+     the stamp resets on every `active` register (new user turn)
 4. If `@hop-auto` matches: call `do_auto_hop(pane_context)` → switch to target
    `session:window.pane` via tmux (no-op when already on that pane)
 

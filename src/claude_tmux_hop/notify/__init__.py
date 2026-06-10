@@ -6,12 +6,20 @@ using a registry of platform-specific implementations.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
+import time
 
 from ..log import log_debug, log_info
-from ..tmux import get_global_option, parse_state_set
+from ..tmux import (
+    get_global_option,
+    get_pane_option,
+    parse_state_set,
+    set_pane_option,
+    unset_pane_option,
+)
 from .base import (
     SUBPROCESS_TIMEOUT,
     FocusDetector,
@@ -37,11 +45,19 @@ __all__ = [
     "should_focus_app",
     "get_platform",
     "is_terminal_focused",
+    "clear_notification_stamp",
     "Notifier",
     "FocusHandler",
     "FocusDetector",
     "PaneContext",
 ]
+
+# OS notification dedup: identical notifications for the same pane are
+# suppressed within this window. The stamp lives in a pane option so it
+# survives across hook processes and dies with the pane.
+NOTIFY_COOLDOWN_SECONDS = 120
+NOTIFY_STAMP_OPTION = "@hop-last-notify"
+NOTIFY_FINGERPRINT_LEN = 12
 
 
 # =============================================================================
@@ -234,6 +250,32 @@ def should_focus_app(state: str) -> bool:
     return state in parse_state_set(focus_states_str)
 
 
+def _notify_fingerprint(message: str) -> str:
+    return hashlib.sha1(message.encode("utf-8")).hexdigest()[:NOTIFY_FINGERPRINT_LEN]
+
+
+def _is_duplicate_notification(pane_id: str, fingerprint: str) -> bool:
+    """True if the same notification was sent for this pane within the cooldown."""
+    raw = get_pane_option(NOTIFY_STAMP_OPTION, pane_id)
+    if not raw:
+        return False
+    ts_str, _, stamped = raw.partition(":")
+    try:
+        ts = int(ts_str)
+    except ValueError:
+        return False
+    return stamped == fingerprint and (time.time() - ts) < NOTIFY_COOLDOWN_SECONDS
+
+
+def _stamp_notification(pane_id: str, fingerprint: str) -> None:
+    set_pane_option(NOTIFY_STAMP_OPTION, f"{int(time.time())}:{fingerprint}", pane_id)
+
+
+def clear_notification_stamp(pane_id: str | None = None) -> None:
+    """Reset the dedup stamp (called when a new user turn starts)."""
+    unset_pane_option(NOTIFY_STAMP_OPTION, pane_id)
+
+
 # =============================================================================
 # Public API
 # =============================================================================
@@ -323,13 +365,22 @@ def focus_terminal(
     return False
 
 
-def handle_state_notifications(state: str, project: str, pane_context: PaneContext | None = None) -> None:
+def handle_state_notifications(
+    state: str,
+    project: str,
+    pane_context: PaneContext | None = None,
+    detail: str = "",
+) -> None:
     """Handle OS notification and terminal focus for a state change.
 
     Focus and notification are independent of the CLI's auto-hop path.
     The caller should invoke `do_auto_hop` separately — tmux pane hopping
     must happen whether or not the terminal app is already in front, so
     this function no longer communicates a skip signal back to the caller.
+
+    `detail` enriches the notification body (permission message, question
+    text, or task summary). Identical bodies for the same pane are
+    deduplicated within NOTIFY_COOLDOWN_SECONDS.
     """
     wants_focus = should_focus_app(state)
     wants_notify = should_notify(state)
@@ -360,9 +411,16 @@ def handle_state_notifications(state: str, project: str, pane_context: PaneConte
             log_info("notification suppressed: terminal already focused")
         else:
             title = "Claude Code"
-            message = f"{project}: {state}"
+            message = f"{project} ({state}): {detail}" if detail else f"{project}: {state}"
+            fingerprint = _notify_fingerprint(message)
+            pane_id = pane_context.pane_id if pane_context else None
+            if pane_id and _is_duplicate_notification(pane_id, fingerprint):
+                log_info("notification suppressed: duplicate within cooldown")
+                return
             click_context = None if wants_focus else pane_context
             if send_notification(title, message, click_context):
+                if pane_id:
+                    _stamp_notification(pane_id, fingerprint)
                 log_info(f"notification sent: {state}")
             else:
                 log_debug(f"notification failed (silent): {state}")

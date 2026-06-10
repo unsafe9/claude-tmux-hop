@@ -1645,6 +1645,51 @@ def test_register_arg_parsing() -> list[TestResult]:
     return results
 
 
+def test_notify_dedup_cooldown() -> list[TestResult]:
+    """Duplicate notifications within the cooldown are detected via the pane stamp."""
+    import time as _time
+
+    from . import notify
+
+    results = []
+
+    fp = notify._notify_fingerprint("proj (waiting): some message")
+    now = int(_time.time())
+
+    original_get_pane_option = notify.get_pane_option
+    try:
+        notify.get_pane_option = lambda name, pane_id=None: f"{now}:{fp}"
+        results.append(TestResult(
+            "notify_dedup__same_fingerprint_within_cooldown",
+            notify._is_duplicate_notification("%1", fp),
+            "Expected duplicate within cooldown",
+        ))
+        results.append(TestResult(
+            "notify_dedup__different_fingerprint_passes",
+            not notify._is_duplicate_notification("%1", "other"),
+            "Different fingerprint must not dedup",
+        ))
+
+        stale = now - notify.NOTIFY_COOLDOWN_SECONDS - 1
+        notify.get_pane_option = lambda name, pane_id=None: f"{stale}:{fp}"
+        results.append(TestResult(
+            "notify_dedup__expired_stamp_passes",
+            not notify._is_duplicate_notification("%1", fp),
+            "Expired stamp must not dedup",
+        ))
+
+        notify.get_pane_option = lambda name, pane_id=None: ""
+        results.append(TestResult(
+            "notify_dedup__no_stamp_passes",
+            not notify._is_duplicate_notification("%1", fp),
+            "Missing stamp must not dedup",
+        ))
+    finally:
+        notify.get_pane_option = original_get_pane_option
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -1661,6 +1706,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_inbox_entry_task_backcompat())
     all_results.extend(test_cmd_list_json())
     all_results.extend(test_register_arg_parsing())
+    all_results.extend(test_notify_dedup_cooldown())
     all_results.extend(test_spawn_task_arg_parsing())
     all_results.extend(test_send_prompt_arg_parsing())
     all_results.extend(test_conductor_arg_parsing())

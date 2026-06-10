@@ -223,6 +223,24 @@ def clear_pane_state(pane_id: str | None = None) -> None:
     run_tmux(*args, check=False)
 
 
+def get_pane_option(name: str, pane_id: str | None = None) -> str:
+    """Get a custom pane option value ("" if unset)."""
+    target = _pane_target_args(pane_id)
+    return run_tmux("show-option", "-p", *target, "-qv", name, check=False)
+
+
+def set_pane_option(name: str, value: str, pane_id: str | None = None) -> None:
+    """Set a custom pane option."""
+    target = _pane_target_args(pane_id)
+    run_tmux("set-option", "-p", *target, name, value, check=False)
+
+
+def unset_pane_option(name: str, pane_id: str | None = None) -> None:
+    """Unset a custom pane option (no-op if not set)."""
+    target = _pane_target_args(pane_id)
+    run_tmux("set-option", "-p", *target, "-u", name, check=False)
+
+
 def get_global_option(name: str, default: str = "") -> str:
     """Get a tmux global option value.
 

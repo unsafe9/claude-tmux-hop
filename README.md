@@ -179,6 +179,11 @@ Notifications are **automatically suppressed** when you're already looking at th
 
 This prevents notification spam when you're actively working in the terminal.
 
+Identical notifications for the same pane are also deduplicated within a
+120-second cooldown (e.g. repeated permission prompts in one turn), and the
+notification body includes context when available: the permission message,
+the pending question, or the task summary on completion.
+
 ### Auto-Focus Navigation
 
 When `@hop-focus-app` is enabled, it performs **full navigation**:
