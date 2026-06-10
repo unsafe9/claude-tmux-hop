@@ -19,8 +19,9 @@ STATE_PRIORITY = {
 # Valid states - single source of truth for CLI validation
 VALID_STATES = list(STATE_PRIORITY.keys())
 
-# States that demand the user's attention: shown in the notification inbox,
-# cycled through, and the only ones worth a git-identity resolution.
+# States that demand the user's attention: listed first in the inbox (and
+# dismissable there, unlike active), cycled through, and the only ones worth
+# a git-identity resolution.
 PENDING_STATES = frozenset({"waiting", "idle"})
 
 # Valid cycle modes

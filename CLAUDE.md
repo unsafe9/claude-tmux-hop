@@ -93,10 +93,11 @@ See `cli.py:should_auto_hop()`, `do_auto_hop()`
 
 ### Notification Inbox
 See `cli.py:_pending_panes()`, `cmd_inbox()`, `cmd_inbox_clear()`, `_format_inbox_lines()`
-- A **view over pane options**, not a store: panes in `PENDING_STATES`
-  (waiting/idle), priority order (waiting → idle, each group newest first;
-  stale waiting panes auto-flip to idle), top 20 shown. Cycle uses the same
-  `_pending_panes()` view. Project column = `@hop-project` (main-repo name —
+- A **view over pane options**, not a store: every tracked pane, attention
+  first — pending (waiting → idle, each group newest first; stale waiting
+  panes auto-flip to idle) then active, top 20 shown. Cycle uses the
+  pending-only `_pending_panes()` view (active panes are listed, not cycled).
+  Project column = `@hop-project` (main-repo name —
   worktree panes don't duplicate the branch in the project column) falling
   back to the cwd basename; branch column = `@hop-branch`, falling back on
   detached HEAD to the linked worktree's directory name or `@<short-sha>`
@@ -104,8 +105,9 @@ See `cli.py:_pending_panes()`, `cmd_inbox()`, `cmd_inbox_clear()`, `_format_inbo
 - `@hop-inbox-key` (default: "i"): opens an fzf popup (enter: jump, ctrl-x:
   clear all) with display-menu fallback when fzf/popup is unavailable
 - ctrl-x sets the `@hop-inbox-cleared-at` global stamp — a view filter, not a
-  state change: panes whose timestamp predates it are hidden from inbox/cycle
-  until their next state change; status bar counts are untouched
+  state change: pending panes whose timestamp predates it are hidden from
+  inbox/cycle until their next state change; active rows are an overview, not
+  notifications, so they stay; status bar counts are untouched
 - Self-heal on open: hooks only fire on graceful exits, so a kill -9'd claude
   leaves stale state on its still-living pane. `cmd_inbox()` clears such
   panes' state (which also corrects the status bar). Gone panes need nothing —
@@ -132,7 +134,7 @@ Cross-platform notification and terminal focus using Strategy pattern:
 
 **Flow in `cmd_register()`:**
 1. Build `PaneContext` from current pane (pane_id, session, window, project)
-2. Record to notification inbox (waiting/idle only)
+2. Persist git identity to pane options (waiting/idle only)
 3. Call `handle_state_notifications(state, project, pane_context, detail)`:
    - If `@hop-focus-app` matches: focus terminal app/tab only (OS-level)
    - If `@hop-notify` matches and terminal not focused: send OS notification

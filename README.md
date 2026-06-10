@@ -75,9 +75,10 @@ set -g @hop-picker-key 'C-f'
 set -g @hop-back-key 'C-Space'
 
 # Customize notification inbox key (default: i)
-# Opens an fzf popup (display-menu fallback) listing waiting/idle panes as
-# aligned columns (icon, session:window, project, branch, time, wait reason,
-# task); enter switches to that pane, ctrl-x dismisses current notifications.
+# Opens an fzf popup (display-menu fallback) listing all tracked panes
+# (waiting/idle first, then active) as aligned columns (icon, session:window,
+# project, branch, time, wait reason, task); enter switches to that pane,
+# ctrl-x dismisses current notifications (active panes stay).
 set -g @hop-inbox-key 'i'
 
 # Cycle mode (default: priority)
@@ -115,9 +116,9 @@ set -g @hop-focus-app 'waiting'      # Focus terminal when a pane needs input
 # Status bar integration - show pane counts in status bar
 set -g status-right '#{E:@hop-status} | %H:%M'
 
-# Status format (default: "{waiting:󰂜} {idle:󰄬}")
+# Status format (default: "{waiting:󰂜} {idle:󰄬} {active:󰑮}")
 # Syntax: {state:icon} shows "icon count" when count > 0
-set -g @hop-status-format '{waiting:󰂜} {idle:󰄬} {active:󰑮}'  # Include active
+# set -g @hop-status-format '{waiting:󰂜} {idle:󰄬}'            # Hide active
 # set -g @hop-status-format '{waiting:W} {idle:I} {active:A}'  # ASCII icons
 
 # Window auto-rename (default: off)
@@ -186,11 +187,12 @@ Benefits:
 
 ### Notification Inbox
 
-`prefix + i` opens an fzf popup (display-menu fallback) listing every pane
-waiting for input or sitting idle, as aligned columns — state icon,
-session:window, project, branch, time ago, wait reason, task summary.
-`enter` jumps to the pane, `ctrl-x` dismisses the current entries (panes
-resurface on their next state change; status bar counts are unaffected).
+`prefix + i` opens an fzf popup (display-menu fallback) listing every tracked
+Claude pane — attention first (waiting → idle), then active — as aligned
+columns: state icon, session:window, project, branch, time ago, wait reason,
+task summary. `enter` jumps to the pane, `ctrl-x` dismisses the waiting/idle
+entries (they resurface on their next state change; active panes are an
+overview, not notifications, so they stay; status bar counts are unaffected).
 
 The listing is derived live from pane state, so it can't go stale: a killed
 pane disappears with its options, and a force-killed Claude process gets its

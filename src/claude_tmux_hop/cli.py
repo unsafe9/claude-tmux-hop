@@ -95,7 +95,7 @@ SECONDS_PER_WEEK = 604800
 STATE_ICONS = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}
 
 # Default status format string
-DEFAULT_STATUS_FORMAT = "{waiting:󰂜} {idle:󰄬}"
+DEFAULT_STATUS_FORMAT = "{waiting:󰂜} {idle:󰄬} {active:󰑮}"
 
 # {state:icon} tokens in @hop-status-format — shared by the status bar
 # renderer and the window-rename icon lookup.
@@ -802,8 +802,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         {state:icon} - shows "icon count" when count > 0, empty otherwise
 
     Example formats:
-        "{waiting:󰂜} {idle:󰄬}"              - default, waiting + idle only
-        "{waiting:󰂜} {idle:󰄬} {active:󰑮}"  - include active count
+        "{waiting:󰂜} {idle:󰄬} {active:󰑮}"  - default, all states
+        "{waiting:󰂜} {idle:󰄬}"              - attention states only
         "{waiting:W} {idle:I} {active:A}"    - ASCII icons
     """
     # Don't log to avoid overhead in polling scenario
@@ -882,11 +882,14 @@ def _format_inbox_lines(entries: list[PaneInfo], use_ansi: bool = False) -> list
 
 
 def cmd_inbox(args: argparse.Namespace) -> int:
-    """Output pending panes for the fzf popup / display menu (internal use).
+    """Output all tracked panes for the fzf popup / display menu (internal use).
 
     The listing is derived straight from pane options (the single source of
-    truth shared with the status bar and cycle). Outputs one aligned line per
-    pane; --ansi adds per-column colors for fzf.
+    truth shared with the status bar and cycle), attention first: pending
+    panes (waiting → idle, dismiss-stamp filtered) then active panes, newest
+    first within each group. Active panes are an overview, not notifications —
+    inbox-clear never hides them. Outputs one aligned line per pane; --ansi
+    adds per-column colors for fzf.
 
     Hooks only fire on graceful exits, so a kill -9'd claude leaves stale
     state on its still-living pane. Opening the inbox is the natural
@@ -910,13 +913,17 @@ def cmd_inbox(args: argparse.Namespace) -> int:
             log_info(f"inbox: cleared {len(dead)} dead panes")
             panes = [p for p in panes if p.id in running]
 
-    entries = _pending_panes(panes)[:INBOX_DISPLAY_LIMIT]
+    actives = sorted(
+        (p for p in panes if p.state not in PENDING_STATES),
+        key=lambda p: priority_sort_key(p.state, p.timestamp),
+    )
+    entries = (_pending_panes(panes) + actives)[:INBOX_DISPLAY_LIMIT]
     if not entries:
         return 0
 
-    # Panes registered before the git-identity options existed show fallback
-    # columns (cwd basename, blank branch); resolve and persist once here so
-    # long-idle panes don't stay degraded until their next state change.
+    # Panes that haven't stored a git identity yet (pre-0.7 registers) show
+    # fallback columns (cwd basename, blank branch); resolve and persist once
+    # here so long-idle panes don't stay degraded until their next state change.
     for pane in entries:
         if not pane.repo and not pane.branch and pane.cwd:
             branch, repo = get_git_identity(pane.cwd)

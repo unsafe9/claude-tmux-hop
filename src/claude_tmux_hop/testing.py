@@ -1932,6 +1932,54 @@ def test_inbox_identity_backfill() -> list[TestResult]:
     return results
 
 
+def test_inbox_includes_active() -> list[TestResult]:
+    """`cmd_inbox` lists active panes after pending ones; dismiss keeps them."""
+    import time
+
+    from . import cli
+    from .tmux import PaneInfo
+
+    results = []
+    now = int(time.time())
+
+    cleared: list[str] = []
+    panes = [
+        PaneInfo(id="%a", state="active", timestamp=now - 10, cwd="", session="s", window=0),
+        PaneInfo(id="%i", state="idle", timestamp=now - 100, cwd="", session="s", window=1),
+        PaneInfo(id="%w", state="waiting", timestamp=now - 200, cwd="", session="s", window=2),
+    ]
+    originals = _patch_cmd_inbox_env(cli, panes, {"%a", "%i", "%w"}, cleared)
+    try:
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.cmd_inbox(argparse.Namespace(ansi=False))
+        ids = [line.split("\t")[1] for line in out.getvalue().splitlines() if line]
+        results.append(TestResult(
+            "inbox_active__priority_order",
+            ids == ["%w", "%i", "%a"],
+            f"Expected waiting → idle → active, got {ids}",
+        ))
+
+        # Dismissing hides the pending entries but never the active overview.
+        cli.get_global_option = (
+            lambda name, default="": str(now) if name == cli.INBOX_CLEARED_OPTION else default
+        )
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.cmd_inbox(argparse.Namespace(ansi=False))
+        ids = [line.split("\t")[1] for line in out.getvalue().splitlines() if line]
+        results.append(TestResult(
+            "inbox_active__survives_dismiss",
+            ids == ["%a"],
+            f"Expected only the active pane after dismiss, got {ids}",
+        ))
+    finally:
+        for name, value in originals.items():
+            setattr(cli, name, value)
+
+    return results
+
+
 def test_pending_panes() -> list[TestResult]:
     """`_pending_panes` filters to pending states and honors the dismiss stamp."""
     import time
@@ -2001,6 +2049,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_inbox_self_heal())
     all_results.extend(test_self_heal_ps_failure())
     all_results.extend(test_inbox_identity_backfill())
+    all_results.extend(test_inbox_includes_active())
     all_results.extend(test_pending_panes())
     all_results.extend(test_cmd_list_json())
     all_results.extend(test_register_arg_parsing())
