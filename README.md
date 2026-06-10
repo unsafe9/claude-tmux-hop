@@ -111,6 +111,13 @@ set -g status-right '#{E:@hop-status} | %H:%M'
 # Syntax: {state:icon} shows "icon count" when count > 0
 set -g @hop-status-format '{waiting:󰂜} {idle:󰄬} {active:󰑮}'  # Include active
 # set -g @hop-status-format '{waiting:W} {idle:I} {active:A}'  # ASCII icons
+
+# Window auto-rename (default: off)
+# Renames the tmux window to "<state-icon> <task summary>" (project name until
+# a task title exists), updating as the session progresses. State icons honor
+# your @hop-status-format tokens. tmux automatic-rename is restored when the
+# session ends.
+set -g @hop-window-rename 'on'
 ```
 
 ### CLI Commands

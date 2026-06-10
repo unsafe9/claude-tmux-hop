@@ -30,9 +30,12 @@ from .tmux import (
     has_hop_state,
     has_session,
     is_in_tmux,
+    is_window_rename_enabled,
     kill_session_if_exists,
     parse_state_set,
+    rename_window,
     resolve_conductor_dir,
+    restore_window_auto_rename,
     run_tmux,
     send_prompt_to_pane,
     set_pane_state,
@@ -84,6 +87,10 @@ STATE_ICONS = {"waiting": "󰂜", "idle": "󰄬", "active": "󰑮"}
 # Default status format string
 DEFAULT_STATUS_FORMAT = "{waiting:󰂜} {idle:󰄬}"
 
+# {state:icon} tokens in @hop-status-format — shared by the status bar
+# renderer and the window-rename icon lookup.
+STATUS_FORMAT_TOKEN_RE = re.compile(r"\{(\w+):([^}]*)\}")
+
 # Task summary length limits
 MAX_TASK_STORED = 200  # Maximum stored in @hop-task tmux option / inbox jsonl
 MAX_TASK_DISPLAY = 50  # Maximum shown in picker / list / hop-status
@@ -132,6 +139,17 @@ def _format_time_ago(timestamp: int) -> str:
     else:
         weeks = diff // SECONDS_PER_WEEK
         return f"{weeks}w"
+
+
+def _get_state_icon(state: str) -> str:
+    """Icon for a state, honoring user-configured `@hop-status-format` tokens.
+
+    Falls back to STATE_ICONS when the format string has no token for the
+    state (e.g. `active` with the default format).
+    """
+    format_str = get_global_option("@hop-status-format", DEFAULT_STATUS_FORMAT)
+    icons = {m.group(1): m.group(2).strip() for m in STATUS_FORMAT_TOKEN_RE.finditer(format_str)}
+    return icons.get(state) or STATE_ICONS.get(state, "")
 
 
 def _normalize_task(text: str) -> str:
@@ -379,6 +397,11 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Get project name for notifications
     project = os.path.basename(os.getcwd())
 
+    if is_window_rename_enabled():
+        icon = _get_state_icon(args.state)
+        base = task or project
+        rename_window(f"{icon} {base}" if icon else base)
+
     # A new user turn resets notification dedup so the next waiting/idle
     # event for this pane always notifies fresh.
     if args.state == "active":
@@ -458,6 +481,10 @@ def cmd_clear(args: argparse.Namespace) -> int:
     """Clear the hop state from the current pane."""
     log_cli_call("clear")
     clear_pane_state()
+
+    # Hand the window name back to tmux once claude exits.
+    if is_window_rename_enabled():
+        restore_window_auto_rename()
 
     # Remove from notification inbox
     pane_id = os.environ.get("TMUX_PANE")
@@ -758,7 +785,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         count = counts.get(state, 0)
         return f"{icon} {count}" if count > 0 else ""
 
-    result = re.sub(r"\{(\w+):([^}]*)\}", expand_placeholder, format_str)
+    result = STATUS_FORMAT_TOKEN_RE.sub(expand_placeholder, format_str)
 
     # Clean up multiple spaces and trim
     result = " ".join(result.split())

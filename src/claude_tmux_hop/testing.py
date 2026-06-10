@@ -1645,6 +1645,38 @@ def test_register_arg_parsing() -> list[TestResult]:
     return results
 
 
+def test_state_icon_from_status_format() -> list[TestResult]:
+    """Window-rename icons honor @hop-status-format tokens with STATE_ICONS fallback."""
+    from . import cli
+
+    results = []
+
+    original_get_global_option = cli.get_global_option
+    try:
+        cli.get_global_option = lambda name, default="": "{waiting:W} {idle:I}"
+        results.append(TestResult(
+            "state_icon__from_format_token",
+            cli._get_state_icon("waiting") == "W",
+            f"Expected 'W', got {cli._get_state_icon('waiting')!r}",
+        ))
+        results.append(TestResult(
+            "state_icon__fallback_when_token_missing",
+            cli._get_state_icon("active") == cli.STATE_ICONS["active"],
+            f"Expected fallback icon, got {cli._get_state_icon('active')!r}",
+        ))
+
+        cli.get_global_option = lambda name, default="": default
+        results.append(TestResult(
+            "state_icon__default_format",
+            cli._get_state_icon("waiting") == cli.STATE_ICONS["waiting"],
+            f"Expected default icon, got {cli._get_state_icon('waiting')!r}",
+        ))
+    finally:
+        cli.get_global_option = original_get_global_option
+
+    return results
+
+
 def test_notify_dedup_cooldown() -> list[TestResult]:
     """Duplicate notifications within the cooldown are detected via the pane stamp."""
     import time as _time
@@ -1706,6 +1738,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_inbox_entry_task_backcompat())
     all_results.extend(test_cmd_list_json())
     all_results.extend(test_register_arg_parsing())
+    all_results.extend(test_state_icon_from_status_format())
     all_results.extend(test_notify_dedup_cooldown())
     all_results.extend(test_spawn_task_arg_parsing())
     all_results.extend(test_send_prompt_arg_parsing())

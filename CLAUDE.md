@@ -94,6 +94,15 @@ See `tmux.py:set_pane_state()`, `get_hop_panes()`
   `register --reason`, only kept while state is `waiting`), `@hop-last-notify`
   (notification dedup stamp)
 
+### Window Auto-Rename
+See `tmux.py:rename_window()`, `is_window_rename_enabled()`, `cli.py:cmd_register()`, `_get_state_icon()`
+- `@hop-window-rename` (default: off): renames the pane's tmux window to
+  `<state-icon> <task summary>` (project name until an ai-title exists) on
+  every register, so window names stay descriptive as the session progresses
+- State icons honor the user's `@hop-status-format` `{state:icon}` tokens,
+  falling back to `STATE_ICONS` for states the format omits
+- SessionEnd restores tmux `automatic-rename` for the window
+
 ### Path Detection
 See `paths.py:get_tmux_config_paths()`, `get_tpm_plugin_paths()`
 - XDG: `$XDG_CONFIG_HOME/tmux/tmux.conf`

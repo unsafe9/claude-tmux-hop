@@ -26,7 +26,9 @@ GIT_TIMEOUT = 5  # Per-call git subprocess timeout
 CLAUDE_BOOT_SLEEP = 3.0  # Wait for `claude` to be ready for keystrokes
 SEND_KEYS_SETTLE = 0.3  # Pause between literal-prompt send and Enter
 
-CONDUCTOR_TRUTHY = {"on", "1", "true", "yes"}
+TRUTHY_VALUES = {"on", "1", "true", "yes"}
+
+WINDOW_NAME_MAX = 20  # Max chars for auto-renamed window names
 
 
 
@@ -241,6 +243,32 @@ def unset_pane_option(name: str, pane_id: str | None = None) -> None:
     run_tmux("set-option", "-p", *target, "-u", name, check=False)
 
 
+def is_window_rename_enabled() -> bool:
+    """Whether descriptive window auto-rename is enabled via `@hop-window-rename`."""
+    return get_global_option("@hop-window-rename", "off").strip().lower() in TRUTHY_VALUES
+
+
+def rename_window(name: str, pane_id: str | None = None) -> None:
+    """Rename the window containing a pane (truncates to WINDOW_NAME_MAX)."""
+    if not name:
+        return
+    if len(name) > WINDOW_NAME_MAX:
+        name = name[: WINDOW_NAME_MAX - 1] + "…"
+    target = _pane_target_args(pane_id)
+    # "--" guards against task titles starting with "-" being parsed as flags.
+    run_tmux("rename-window", *target, "--", name, check=False)
+
+
+def restore_window_auto_rename(pane_id: str | None = None) -> None:
+    """Re-enable tmux automatic-rename for the window containing a pane.
+
+    rename-window disables automatic-rename for the window, so SessionEnd
+    restores it — otherwise the last task title would stick after claude exits.
+    """
+    target = _pane_target_args(pane_id)
+    run_tmux("set-option", "-w", *target, "automatic-rename", "on", check=False)
+
+
 def get_global_option(name: str, default: str = "") -> str:
     """Get a tmux global option value.
 
@@ -388,7 +416,7 @@ def _get_conductor_session() -> str:
 
 def _is_conductor_enabled() -> bool:
     """Whether the conductor feature is enabled via `@hop-conductor-enabled`."""
-    return get_global_option("@hop-conductor-enabled", "off").strip().lower() in CONDUCTOR_TRUTHY
+    return get_global_option("@hop-conductor-enabled", "off").strip().lower() in TRUTHY_VALUES
 
 
 def resolve_conductor_dir() -> Path:
