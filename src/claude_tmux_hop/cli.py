@@ -98,8 +98,10 @@ MAX_TASK_STORED = 200  # Maximum stored in @hop-task tmux option / inbox jsonl
 MAX_TASK_DISPLAY = 50  # Maximum shown in picker / list / hop-status
 MAX_NOTIFY_DETAIL = 100  # Maximum detail length in OS notification body
 
-# Inbox listing: per-column width cap for project/branch
-INBOX_COL_MAX = 24
+# Inbox listing: per-column width caps (fzf truncates overflow at the popup
+# edge, so these only bound how far the later columns get pushed right)
+INBOX_COL_MAX = 56
+INBOX_TASK_MAX = 100
 
 # ANSI styles for the fzf inbox popup (--ansi)
 ANSI_RESET = "\033[0m"
@@ -108,7 +110,7 @@ _ANSI_YELLOW = "\033[33m"
 STATE_ANSI = {"waiting": _ANSI_YELLOW, "idle": "\033[32m", "active": "\033[36m"}
 # Column order: icon, session:window, project, branch, time, reason, task.
 # The icon column ("") is colored per-state via STATE_ANSI instead.
-INBOX_COLUMN_STYLES = ("", _ANSI_DIM, "", "\033[36m", _ANSI_DIM, _ANSI_YELLOW, "")
+INBOX_COLUMN_STYLES = ("", "\033[35m", "", "\033[36m", _ANSI_DIM, _ANSI_YELLOW, "")
 
 # How many bytes of the transcript tail to scan for the latest ai-title.
 # Claude Code regenerates ai-title each user turn; the most recent one is
@@ -835,7 +837,7 @@ def _format_inbox_lines(entries: list[inbox.InboxEntry], use_ansi: bool = False)
             _format_task_display(entry.branch, INBOX_COL_MAX),
             _format_time_ago(entry.timestamp),
             entry.reason,
-            _format_task_display(entry.task),
+            _format_task_display(entry.task, INBOX_TASK_MAX),
         )
         for entry in entries
     ]
