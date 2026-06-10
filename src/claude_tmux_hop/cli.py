@@ -413,10 +413,12 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Get project name for notifications
     project = os.path.basename(os.getcwd())
 
+    # Window names are navigation labels: the dir basename is stable and short
+    # (worktree dirs carry the task hint), while the ai-title churns every
+    # turn. The task summary stays visible via inbox/picker and @hop-task.
     if is_window_rename_enabled():
         icon = _get_state_icon(args.state)
-        base = task or project
-        rename_window(f"{icon} {base}" if icon else base)
+        rename_window(f"{icon} {project}" if icon else project)
 
     # A new user turn resets notification dedup so the next waiting/idle
     # event for this pane always notifies fresh.

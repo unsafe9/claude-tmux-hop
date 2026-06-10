@@ -67,8 +67,10 @@ See `tmux.py:set_pane_state()`, `get_hop_panes()`
 ### Window Auto-Rename
 See `tmux.py:rename_window()`, `is_window_rename_enabled()`, `cli.py:cmd_register()`, `_get_state_icon()`
 - `@hop-window-rename` (default: off): renames the pane's tmux window to
-  `<state-icon> <task summary>` (project name until an ai-title exists) on
-  every register, so window names stay descriptive as the session progresses
+  `<state-icon> <dir basename>` on every register — the icon tracks state
+  while the name stays a stable navigation label (worktree dirs naturally
+  distinguish parallel work; the churning ai-title summary stays in
+  inbox/picker/`@hop-task` instead)
 - State icons honor the user's `@hop-status-format` `{state:icon}` tokens,
   falling back to `STATE_ICONS` for states the format omits
 - SessionEnd restores tmux `automatic-rename` for the window

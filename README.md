@@ -16,7 +16,7 @@ Quickly hop between Claude Code sessions running in tmux panes.
 - **Cross-session navigation**: Works across all tmux sessions
 - **Status bar integration**: Show pane counts with customizable icons
 - **Popup picker**: Interactive fzf-based picker with time-in-state display (requires fzf)
-- **Window auto-rename**: Optionally rename windows to `<state-icon> <task summary>` as sessions progress
+- **Window auto-rename**: Optionally rename windows to `<state-icon> <directory name>` so state stays visible at a glance
 - **Conductor** (opt-in): A persistent orchestrator Claude session in a popup that dispatches tasks to your other panes
 - **Claude Code skills**: `hop-status` (session overview), `hop-config` (inspect/edit options), `hop-dispatch` (route a task to another pane)
 
@@ -121,9 +121,10 @@ set -g @hop-status-format '{waiting:󰂜} {idle:󰄬} {active:󰑮}'  # Include 
 # set -g @hop-status-format '{waiting:W} {idle:I} {active:A}'  # ASCII icons
 
 # Window auto-rename (default: off)
-# Renames the tmux window to "<state-icon> <task summary>" (project name until
-# a task title exists), updating as the session progresses. State icons honor
-# your @hop-status-format tokens. tmux automatic-rename is restored when the
+# Renames the tmux window to "<state-icon> <directory name>" so the state icon
+# stays current while the name remains a stable label (worktree directories
+# naturally distinguish parallel work). State icons honor your
+# @hop-status-format tokens. tmux automatic-rename is restored when the
 # session ends.
 set -g @hop-window-rename 'on'
 
