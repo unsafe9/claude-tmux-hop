@@ -114,16 +114,21 @@ See `cli.py:should_auto_hop()`, `do_auto_hop()`
 - `@hop-auto-priority-only`: only hop if highest priority (default: "on")
 
 ### Notification Inbox
-See `inbox.py`, `cli.py:cmd_inbox()`
-- `@hop-inbox-key`: keybinding to open inbox display-menu (default: "i")
+See `inbox.py`, `cli.py:cmd_inbox()`, `_format_inbox_lines()`
 - Records `waiting` and `idle` state changes to `~/.local/state/claude-tmux-hop/inbox.jsonl`;
   git identity is resolved at record time (waiting/idle only — the frequent
   `active` register skips the git call) via `tmux.py:get_git_identity()`:
   project = main-repo name (worktree panes don't duplicate the branch in the
   project column), branch column = branch name, falling back on detached HEAD
   to the linked worktree's directory name or `@<short-sha>` in the main checkout
+- `@hop-inbox-key` (default: "i"): opens an fzf popup (enter: jump, ctrl-x:
+  clear all) with display-menu fallback when fzf/popup is unavailable
 - Max 50 entries stored, displays 20 most recent (priority order: waiting → idle, each group newest first; stale waiting panes auto-flip to idle)
-- Each entry shows state icon, project name, time ago, wait reason (when waiting), task summary; clicking switches to pane
+- Entries render as aligned columns — state icon (honors `@hop-status-format`),
+  session:window, project, branch, time ago, wait reason, task summary —
+  padded to the widest cell; columns empty across all entries are dropped.
+  `inbox --ansi` adds per-column colors for fzf; the menu fallback stays plain
+  (display-menu can't render ANSI codes)
 
 ### Notification & Focus (notify/)
 Cross-platform notification and terminal focus using Strategy pattern:

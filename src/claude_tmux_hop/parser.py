@@ -201,7 +201,12 @@ def create_parser(
     # inbox command (internal)
     inbox_parser = subparsers.add_parser(
         "inbox",
-        help="Output notification inbox for display menu (internal)",
+        help="Output notification inbox for fzf popup / display menu (internal)",
+    )
+    inbox_parser.add_argument(
+        "--ansi",
+        action="store_true",
+        help="Colorize columns with ANSI codes (fzf popup)",
     )
     inbox_parser.set_defaults(func=cmd_inbox)
 

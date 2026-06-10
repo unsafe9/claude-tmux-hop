@@ -1791,6 +1791,84 @@ def test_git_identity() -> list[TestResult]:
     return results
 
 
+def test_inbox_lines_alignment() -> list[TestResult]:
+    """`_format_inbox_lines` pads columns, drops empty ones, colors on demand."""
+    import time
+
+    from . import cli
+    from .inbox import InboxEntry
+
+    results = []
+    now = int(time.time())
+
+    # Pin the icon source so the test is independent of the user's
+    # @hop-status-format tmux option.
+    original_get_global_option = cli.get_global_option
+    cli.get_global_option = lambda name, default="": default
+    try:
+        entries = [
+            InboxEntry(
+                timestamp=now - 300, state="waiting", project="proj",
+                pane_id="%1", session="main", window=1,
+                task="fix bug", reason="question", branch="feature/login",
+            ),
+            InboxEntry(
+                timestamp=now - 300, state="idle", project="longer-project",
+                pane_id="%2", session="work", window=12,
+                task="do stuff", reason="", branch="hotfix/x",
+            ),
+        ]
+        lines = cli._format_inbox_lines(entries)
+        labels = [line.split("\t")[0] for line in lines]
+        pane_ids = [line.split("\t")[1] for line in lines]
+
+        results.append(TestResult(
+            "inbox_lines__pane_id_field",
+            pane_ids == ["%1", "%2"],
+            f"Expected ['%1', '%2'], got {pane_ids}",
+        ))
+        results.append(TestResult(
+            "inbox_lines__branch_columns_align",
+            labels[0].index("feature/login") == labels[1].index("hotfix/x"),
+            f"Branch columns misaligned: {labels}",
+        ))
+        results.append(TestResult(
+            "inbox_lines__task_columns_align",
+            labels[0].index("fix bug") == labels[1].index("do stuff"),
+            f"Task columns misaligned: {labels}",
+        ))
+        results.append(TestResult(
+            "inbox_lines__plain_has_no_ansi",
+            "\033" not in lines[0] and "\033" not in lines[1],
+            f"Plain output must not contain ANSI codes: {labels}",
+        ))
+
+        ansi_lines = cli._format_inbox_lines(entries, use_ansi=True)
+        results.append(TestResult(
+            "inbox_lines__ansi_colors_state_icon",
+            cli.STATE_ANSI["waiting"] in ansi_lines[0]
+            and cli.STATE_ANSI["idle"] in ansi_lines[1]
+            and cli.ANSI_RESET in ansi_lines[0],
+            f"ANSI output missing state colors: {ansi_lines}",
+        ))
+
+        # A column empty across all entries is dropped entirely.
+        single = [InboxEntry(
+            timestamp=now - 300, state="idle", project="demo",
+            pane_id="%9", session="work", window=2,
+        )]
+        line = cli._format_inbox_lines(single)[0]
+        results.append(TestResult(
+            "inbox_lines__empty_columns_dropped",
+            line == "󰄬  work:2  demo  5m\t%9",
+            f"Expected empty branch/reason/task columns dropped, got {line!r}",
+        ))
+    finally:
+        cli.get_global_option = original_get_global_option
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -1806,6 +1884,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_extract_task_from_transcript())
     all_results.extend(test_inbox_entry_task_backcompat())
     all_results.extend(test_git_identity())
+    all_results.extend(test_inbox_lines_alignment())
     all_results.extend(test_cmd_list_json())
     all_results.extend(test_register_arg_parsing())
     all_results.extend(test_state_icon_from_status_format())

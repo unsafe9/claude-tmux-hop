@@ -76,10 +76,19 @@ hop_picker() {
     fi
 }
 
-# Show notification inbox using display-menu
-hop_inbox() {
-    local cmd
-    cmd=$(get_hop_cmd)
+# Show notification inbox using fzf in a popup
+inbox_popup() {
+    local cmd="$1"
+
+    local fzf_cmd
+    fzf_cmd="$cmd inbox --ansi | fzf --ansi --reverse --no-info --with-nth=1 --delimiter='\t' --header='enter: jump / ctrl-x: clear all' --pointer='>' --prompt='' --bind='enter:execute-silent($cmd switch --pane {2})+abort' --bind='ctrl-x:execute-silent($cmd inbox-clear)+abort' || true"
+
+    tmux display-popup -E -w 80% -h 60% -T " Notifications " bash -c "$fzf_cmd"
+}
+
+# Show notification inbox using display-menu (fallback)
+inbox_menu() {
+    local cmd="$1"
     local menu_args=("-T" "#[align=centre]Notifications")
     local line label pane_id
     local count=0
@@ -100,6 +109,22 @@ hop_inbox() {
     menu_args+=("Clear" "x" "run-shell '$cmd inbox-clear'")
 
     tmux display-menu "${menu_args[@]}"
+}
+
+# Main notification inbox function
+hop_inbox() {
+    local cmd
+    cmd=$(get_hop_cmd)
+
+    if supports_popup && command -v fzf &>/dev/null; then
+        if [[ -z "$($cmd inbox)" ]]; then
+            tmux display-message "No notifications"
+            return 0
+        fi
+        inbox_popup "$cmd"
+    else
+        inbox_menu "$cmd"
+    fi
 }
 
 # Main plugin setup

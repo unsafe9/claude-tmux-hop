@@ -97,6 +97,18 @@ MAX_TASK_STORED = 200  # Maximum stored in @hop-task tmux option / inbox jsonl
 MAX_TASK_DISPLAY = 50  # Maximum shown in picker / list / hop-status
 MAX_NOTIFY_DETAIL = 100  # Maximum detail length in OS notification body
 
+# Inbox listing: per-column width cap for project/branch
+INBOX_COL_MAX = 24
+
+# ANSI styles for the fzf inbox popup (--ansi)
+ANSI_RESET = "\033[0m"
+_ANSI_DIM = "\033[90m"
+_ANSI_YELLOW = "\033[33m"
+STATE_ANSI = {"waiting": _ANSI_YELLOW, "idle": "\033[32m", "active": "\033[36m"}
+# Column order: icon, session:window, project, branch, time, reason, task.
+# The icon column ("") is colored per-state via STATE_ANSI instead.
+INBOX_COLUMN_STYLES = ("", _ANSI_DIM, "", "\033[36m", _ANSI_DIM, _ANSI_YELLOW, "")
+
 # How many bytes of the transcript tail to scan for the latest ai-title.
 # Claude Code regenerates ai-title each user turn; the most recent one is
 # always within the last few KB even on very long sessions. 64KB gives a
@@ -803,26 +815,58 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_inbox(args: argparse.Namespace) -> int:
-    """Output inbox entries for display menu (internal use).
+def _format_inbox_lines(entries: list[inbox.InboxEntry], use_ansi: bool = False) -> list[str]:
+    """Render inbox entries as aligned columns: "label<TAB>pane_id" lines.
 
-    Outputs one line per entry: "icon project  time_ago<TAB>pane_id"
+    Columns (icon, session:window, project, branch, time, reason, task) are
+    padded to the widest cell; columns empty across all entries are dropped.
+    With use_ansi, cells are wrapped in INBOX_COLUMN_STYLES / STATE_ANSI for
+    the fzf popup — display-menu callers must stay plain.
+    """
+    icons = {state: _get_state_icon(state) or "?" for state in {e.state for e in entries}}
+    rows = [
+        (
+            icons[entry.state],
+            f"{entry.session}:{entry.window}",
+            _format_task_display(entry.project, INBOX_COL_MAX),
+            _format_task_display(entry.branch, INBOX_COL_MAX),
+            _format_time_ago(entry.timestamp),
+            entry.reason,
+            _format_task_display(entry.task),
+        )
+        for entry in entries
+    ]
+    widths = [max(len(row[i]) for row in rows) for i in range(len(INBOX_COLUMN_STYLES))]
+
+    lines = []
+    for entry, row in zip(entries, rows):
+        cells = []
+        for i, cell in enumerate(row):
+            if widths[i] == 0:
+                continue
+            padded = cell.ljust(widths[i])
+            if use_ansi:
+                style = STATE_ANSI.get(entry.state, "") if i == 0 else INBOX_COLUMN_STYLES[i]
+                if style:
+                    padded = f"{style}{padded}{ANSI_RESET}"
+            cells.append(padded)
+        label = "  ".join(cells).rstrip()
+        lines.append(f"{label}\t{entry.pane_id}")
+    return lines
+
+
+def cmd_inbox(args: argparse.Namespace) -> int:
+    """Output inbox entries for the fzf popup / display menu (internal use).
+
+    Outputs one aligned line per entry; --ansi adds per-column colors for fzf.
     """
     validate_waiting_panes(get_hop_panes(validate=False))
     entries = inbox.get_entries()
     if not entries:
         return 0
 
-    for entry in entries:
-        icon = STATE_ICONS.get(entry.state, "?")
-        time_ago = _format_time_ago(entry.timestamp)
-        label = f"{icon} {entry.project}  {time_ago}"
-        if entry.reason:
-            label = f"{label} ({entry.reason})"
-        task = _format_task_display(entry.task)
-        if task:
-            label = f"{label}  {task}"
-        print(f"{label}\t{entry.pane_id}")
+    for line in _format_inbox_lines(entries, use_ansi=bool(getattr(args, "ansi", False))):
+        print(line)
 
     return 0
 
