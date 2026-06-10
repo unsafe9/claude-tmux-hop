@@ -7,11 +7,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "[ \"$CLAUDE_TMUX_HOP_CONDUCTOR\" = 1 ] && ${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop conductor-context || true"
+            "command": "[ \"$CLAUDE_TMUX_HOP_CONDUCTOR\" = 1 ] && ${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop conductor-context || true",
+            "timeout": 10
           }
         ]
       }
@@ -21,22 +23,35 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active",
+            "timeout": 10
           },
           {
             "type": "command",
-            "command": "[ \"$CLAUDE_TMUX_HOP_CONDUCTOR\" = 1 ] && ${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop conductor-prompt-context || true"
+            "command": "[ \"$CLAUDE_TMUX_HOP_CONDUCTOR\" = 1 ] && ${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop conductor-prompt-context || true",
+            "timeout": 10
           }
         ]
       }
     ],
     "PreToolUse": [
       {
-        "matcher": "AskUserQuestion|ExitPlanMode",
+        "matcher": "AskUserQuestion",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting --reason question",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting --reason plan",
+            "timeout": 10
           }
         ]
       }
@@ -47,7 +62,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active",
+            "timeout": 10
           }
         ]
       }
@@ -58,18 +74,30 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active",
+            "timeout": 10
           }
         ]
       }
     ],
     "Notification": [
       {
-        "matcher": "permission_prompt|elicitation_dialog",
+        "matcher": "permission_prompt",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting --reason permission",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "elicitation_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting --reason elicitation",
+            "timeout": 10
           }
         ]
       },
@@ -78,7 +106,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle",
+            "timeout": 10
           }
         ]
       }
@@ -88,7 +117,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state waiting --reason elicitation",
+            "timeout": 10
           }
         ]
       }
@@ -98,7 +128,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active",
+            "timeout": 10
           }
         ]
       }
@@ -108,7 +139,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle",
+            "timeout": 10
           }
         ]
       }
@@ -118,7 +150,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle",
+            "timeout": 10
           }
         ]
       }
@@ -128,7 +161,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop clear"
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop clear",
+            "timeout": 10
           }
         ]
       }

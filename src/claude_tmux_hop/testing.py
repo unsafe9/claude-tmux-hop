@@ -1622,6 +1622,29 @@ def test_spawn_window_session_target_disambiguation() -> list[TestResult]:
     return results
 
 
+def test_register_arg_parsing() -> list[TestResult]:
+    """`register` parses --state/--reason into the expected namespace."""
+    results = []
+
+    parser = _build_full_parser()
+
+    ns = parser.parse_args(["register", "--state", "waiting", "--reason", "permission"])
+    results.append(TestResult(
+        "register_arg_parsing__state_and_reason",
+        ns.state == "waiting" and ns.reason == "permission",
+        f"Unexpected namespace: {ns!r}",
+    ))
+
+    ns = parser.parse_args(["register", "--state", "idle"])
+    results.append(TestResult(
+        "register_arg_parsing__reason_defaults_empty",
+        ns.reason == "",
+        f"Expected empty default reason, got {ns.reason!r}",
+    ))
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -1637,6 +1660,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_extract_task_from_transcript())
     all_results.extend(test_inbox_entry_task_backcompat())
     all_results.extend(test_cmd_list_json())
+    all_results.extend(test_register_arg_parsing())
     all_results.extend(test_spawn_task_arg_parsing())
     all_results.extend(test_send_prompt_arg_parsing())
     all_results.extend(test_conductor_arg_parsing())

@@ -52,7 +52,7 @@ See `cli.py:main()` for full command definitions.
 ```bash
 claude-tmux-hop <command>
   # Core commands
-  register --state <s>    # Set state: waiting|idle|active
+  register --state <s> [--reason <r>]  # Set state: waiting|idle|active (+ wait reason)
   clear                   # Remove hop state from pane
   cycle                   # Jump to next pane (priority order)
   back                    # Jump back to previous pane
@@ -89,7 +89,10 @@ See `priority.py:STATE_PRIORITY`
 
 ### Tmux State Storage
 See `tmux.py:set_pane_state()`, `get_hop_panes()`
-- Uses custom pane options: `@hop-state`, `@hop-timestamp`
+- Uses custom pane options: `@hop-state`, `@hop-timestamp`, `@hop-task`,
+  `@hop-wait-reason` (question/plan/permission/elicitation — set by hooks via
+  `register --reason`, only kept while state is `waiting`), `@hop-last-notify`
+  (notification dedup stamp)
 
 ### Path Detection
 See `paths.py:get_tmux_config_paths()`, `get_tpm_plugin_paths()`
@@ -108,7 +111,7 @@ See `inbox.py`, `cli.py:cmd_inbox()`
 - Records `waiting` and `idle` state changes to `~/.local/state/claude-tmux-hop/inbox.jsonl`
 - `@hop-inbox-key`: keybinding to open inbox display-menu (default: "i")
 - Max 50 entries stored, displays 20 most recent (priority order: waiting → idle, each group newest first; stale waiting panes auto-flip to idle)
-- Each entry shows state icon, project name, time ago; clicking switches to pane
+- Each entry shows state icon, project name, time ago, wait reason (when waiting), task summary; clicking switches to pane
 
 ### Notification & Focus (notify/)
 Cross-platform notification and terminal focus using Strategy pattern:
@@ -166,13 +169,17 @@ See `cli.py:cmd_conductor()`, `cli.py:cmd_conductor_context()`, `cli.py:cmd_cond
 - Four dispatch modes the conductor picks among per task: (a) navigate via `switch`, (b) inject via `send-prompt`, (c) new window in project root via `spawn-task`, (d) new worktree (conductor runs `git worktree add` itself) then `spawn-task`. The conductor's instructions describe *which mode to pick*; the actual CLI shape for each mode lives in the `hop-dispatch` skill so flag changes only need to land in one place. The on-disk CONDUCTOR_INSTRUCTIONS marker block can go stale across plugin updates — the dispatch logic still works (skills travel with the binary) but the user is responsible for running `hop-config`'s "update conductor instructions" + `prefix + Y` (respawn) to pick up the refreshed copy.
 
 ### Hook Flow (hooks.json)
+All hook commands carry an explicit `timeout: 10` so a hung tmux can never
+block Claude for the 60s default.
 - SessionStart (startup|resume) → idle + `conductor-context` (in-memory instruction inject when needed)
 - UserPromptSubmit → active + `conductor-prompt-context` (fresh pane snapshot when in workbench)
-- PreToolUse (AskUserQuestion|ExitPlanMode) → waiting
+- PreToolUse (AskUserQuestion) → waiting, reason `question`
+- PreToolUse (ExitPlanMode) → waiting, reason `plan`
 - PostToolUse / PostToolUseFailure (AskUserQuestion|ExitPlanMode) → active
-- Notification (permission_prompt|elicitation_dialog) → waiting
+- Notification (permission_prompt) → waiting, reason `permission`
+- Notification (elicitation_dialog) → waiting, reason `elicitation`
 - Notification (idle_prompt) → idle
-- Elicitation → waiting (MCP server requests user input)
+- Elicitation → waiting, reason `elicitation` (MCP server requests user input)
 - ElicitationResult → active (user responded to MCP elicitation)
 - Stop / StopFailure → idle
 - SessionEnd → clear

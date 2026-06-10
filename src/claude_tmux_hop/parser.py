@@ -75,6 +75,12 @@ def create_parser(
         "-t",
         help="Manual task summary override (skips transcript-based auto-derivation)",
     )
+    register_parser.add_argument(
+        "--reason",
+        "-r",
+        default="",
+        help="Wait reason stored alongside the waiting state (set by hooks: question/plan/permission/elicitation)",
+    )
     register_parser.set_defaults(func=cmd_register)
 
     # clear command

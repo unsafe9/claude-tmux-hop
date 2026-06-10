@@ -28,6 +28,7 @@ class InboxEntry:
     session: str
     window: int
     task: str = ""
+    reason: str = ""
 
 
 def record(
@@ -37,6 +38,7 @@ def record(
     session: str,
     window: int,
     task: str = "",
+    reason: str = "",
 ) -> None:
     """Record a state change to the inbox.
 
@@ -65,6 +67,7 @@ def record(
         "session": session,
         "window": window,
         "task": task,
+        "reason": reason,
     }
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -118,6 +121,7 @@ def get_entries(limit: int = DEFAULT_DISPLAY_LIMIT) -> list[InboxEntry]:
                     session=d["session"],
                     window=d["window"],
                     task=d.get("task", ""),
+                    reason=d.get("reason", ""),
                 ))
             except (json.JSONDecodeError, KeyError):
                 continue

@@ -151,6 +151,7 @@ Controlled by `@hop-cycle-mode` (default: `priority`):
 State is stored directly on tmux panes using custom options:
 - `@hop-state`: Current state (waiting/idle/active)
 - `@hop-timestamp`: Unix timestamp of last state change
+- `@hop-wait-reason`: Why a pane is waiting (question/plan/permission/elicitation), shown in picker/list/inbox
 
 Benefits:
 - No external files

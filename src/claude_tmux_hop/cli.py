@@ -356,8 +356,9 @@ def _build_pane_context(project: str) -> PaneContext | None:
 @requires_tmux(silent=True)
 def cmd_register(args: argparse.Namespace) -> int:
     """Register the current pane with a state."""
-    log_cli_call("register", {"state": args.state})
-    set_pane_state(args.state)
+    reason = getattr(args, "reason", "") or ""
+    log_cli_call("register", {"state": args.state, "reason": reason})
+    set_pane_state(args.state, reason=reason)
     log_info(f"register: state set to {args.state}")
 
     # Refresh the per-pane task summary. Manual --task wins over the hook
@@ -385,6 +386,7 @@ def cmd_register(args: argparse.Namespace) -> int:
             session=pane_context.session,
             window=pane_context.window,
             task=task,
+            reason=reason,
         )
 
     # Focus and auto-hop are independent: app focus is an OS-level action,
@@ -532,6 +534,8 @@ def cmd_picker_data(args: argparse.Namespace) -> int:
         # Output: display_label<TAB>pane_id
         # fzf will show the label but we extract pane_id on selection
         label = f"{icon} {pane.project} ({pane.session}:{pane.window}) [{time_ago}]"
+        if pane.wait_reason:
+            label = f"{label} ({pane.wait_reason})"
         task = _format_task_display(pane.task)
         if task:
             label = f"{label}  {task}"
@@ -571,6 +575,7 @@ def _build_pane_records() -> list[dict]:
             "project": pane.project,
             **get_git_context(pane.cwd),
             "task": pane.task,
+            "wait_reason": pane.wait_reason,
         }
         for pane in sorted_panes
     ]
@@ -599,6 +604,8 @@ def cmd_list(args: argparse.Namespace) -> int:
     for pane in sorted_panes:
         ts = datetime.fromtimestamp(pane.timestamp).strftime("%H:%M:%S") if pane.timestamp else "——:——:——"
         line = f"{pane.state:8} {ts}  {pane.id:6} {pane.session}:{pane.window}  {pane.project}"
+        if pane.wait_reason:
+            line = f"{line} [{pane.wait_reason}]"
         task = _format_task_display(pane.task)
         if task:
             line = f"{line}  — {task}"
@@ -741,6 +748,8 @@ def cmd_inbox(args: argparse.Namespace) -> int:
         icon = STATE_ICONS.get(entry.state, "?")
         time_ago = _format_time_ago(entry.timestamp)
         label = f"{icon} {entry.project}  {time_ago}"
+        if entry.reason:
+            label = f"{label} ({entry.reason})"
         task = _format_task_display(entry.task)
         if task:
             label = f"{label}  {task}"

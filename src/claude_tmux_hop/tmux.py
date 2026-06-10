@@ -41,6 +41,7 @@ class PaneInfo:
     session: str  # Session name
     window: int  # Window index
     task: str = ""  # One-line task summary (from Claude Code ai-title)
+    wait_reason: str = ""  # Why the pane is waiting (question/plan/permission/elicitation)
 
     @property
     def project(self) -> str:
@@ -155,17 +156,26 @@ def _pane_target_args(pane_id: str | None) -> list[str]:
     return ["-t", resolved] if resolved else []
 
 
-def set_pane_state(state: str, pane_id: str | None = None) -> None:
+def set_pane_state(state: str, pane_id: str | None = None, reason: str = "") -> None:
     """Set the hop state for a pane.
 
     Args:
         state: The state to set ("waiting", "idle", "active")
         pane_id: The pane ID, or None for current pane
+        reason: Why the pane is waiting (stored only for "waiting" state)
     """
     target = _pane_target_args(pane_id)
     timestamp = str(int(time.time()))
-    run_tmux("set-option", "-p", *target, "@hop-state", state)
-    run_tmux("set-option", "-p", *target, "@hop-timestamp", timestamp)
+    # Single tmux invocation: ";" separates chained commands, and unsetting a
+    # never-set option mid-chain does not abort the chain. register is the
+    # hot path (every hook event), so the 3 writes share one subprocess.
+    args = ["set-option", "-p", *target, "@hop-state", state,
+            ";", "set-option", "-p", *target, "@hop-timestamp", timestamp]
+    if state == "waiting" and reason:
+        args += [";", "set-option", "-p", *target, "@hop-wait-reason", reason]
+    else:
+        args += [";", "set-option", "-p", *target, "-u", "@hop-wait-reason"]
+    run_tmux(*args)
 
 
 def set_pane_task(task: str, pane_id: str | None = None) -> None:
@@ -203,9 +213,14 @@ def clear_pane_state(pane_id: str | None = None) -> None:
         pane_id: The pane ID, or None for current pane
     """
     target = _pane_target_args(pane_id)
-    run_tmux("set-option", "-p", *target, "-u", "@hop-state", check=False)
-    run_tmux("set-option", "-p", *target, "-u", "@hop-timestamp", check=False)
-    run_tmux("set-option", "-p", *target, "-u", "@hop-task", check=False)
+    options = ("@hop-state", "@hop-timestamp", "@hop-task",
+               "@hop-wait-reason", "@hop-last-notify")
+    args: list[str] = []
+    for opt in options:
+        if args:
+            args.append(";")
+        args += ["set-option", "-p", *target, "-u", opt]
+    run_tmux(*args, check=False)
 
 
 def get_global_option(name: str, default: str = "") -> str:
@@ -525,12 +540,12 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
     conductor_session = _get_conductor_session()
 
     # Query all panes with hop options
-    # Format: pane_id \t state \t timestamp \t cwd \t session \t window \t task
+    # Format: pane_id \t state \t timestamp \t cwd \t session \t window \t task \t wait_reason
     output = run_tmux(
         "list-panes",
         "-a",
         "-F",
-        "#{pane_id}\t#{@hop-state}\t#{@hop-timestamp}\t#{pane_current_path}\t#{session_name}\t#{window_index}\t#{@hop-task}",
+        "#{pane_id}\t#{@hop-state}\t#{@hop-timestamp}\t#{pane_current_path}\t#{session_name}\t#{window_index}\t#{@hop-task}\t#{@hop-wait-reason}",
     )
 
     panes = []
@@ -538,12 +553,13 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
         if not line:
             continue
 
-        parts = line.split("\t", maxsplit=6)
+        parts = line.split("\t", maxsplit=7)
         if len(parts) < 6:
             continue
 
         pane_id, state, timestamp_str, cwd, session, window_str = parts[:6]
         task = parts[6] if len(parts) >= 7 else ""
+        wait_reason = parts[7] if len(parts) >= 8 else ""
 
         # Only include panes with hop state
         if not state:
@@ -573,6 +589,7 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
                 session=session,
                 window=window,
                 task=task,
+                wait_reason=wait_reason,
             )
         )
 
@@ -765,6 +782,7 @@ def validate_waiting_panes(panes: list[PaneInfo]) -> None:
 
         pane.state = "idle"
         pane.timestamp = now
+        pane.wait_reason = ""
         inbox.record(
             state="idle",
             project=pane.project,
