@@ -76,12 +76,18 @@ hop_picker() {
     fi
 }
 
-# Show notification inbox using fzf in a popup
+# Show notification inbox using fzf in a popup.
+# Takes pre-rendered inbox data via a temp file so the (process-scanning)
+# inbox command runs once per open, not once more inside the popup shell.
 inbox_popup() {
-    local cmd="$1"
+    local cmd="$1" data="$2"
+
+    local tmpfile
+    tmpfile=$(mktemp "${TMPDIR:-/tmp}/hop-inbox.XXXXXX") || return 1
+    printf '%s\n' "$data" > "$tmpfile"
 
     local fzf_cmd
-    fzf_cmd="$cmd inbox --ansi | fzf --ansi --reverse --no-info --with-nth=1 --delimiter='\t' --header='enter: jump / ctrl-x: clear all' --pointer='>' --prompt='' --bind='enter:execute-silent($cmd switch --pane {2})+abort' --bind='ctrl-x:execute-silent($cmd inbox-clear)+abort' || true"
+    fzf_cmd="trap 'rm -f \"$tmpfile\"' EXIT; fzf --ansi --reverse --no-info --with-nth=1 --delimiter='\t' --header='enter: jump / ctrl-x: clear all' --pointer='>' --prompt='' --bind='enter:execute-silent($cmd switch --pane {2})+abort' --bind='ctrl-x:execute-silent($cmd inbox-clear)+abort' < \"$tmpfile\" || true"
 
     tmux display-popup -E -w 80% -h 60% -T " Notifications " bash -c "$fzf_cmd"
 }
@@ -117,11 +123,13 @@ hop_inbox() {
     cmd=$(get_hop_cmd)
 
     if supports_popup && command -v fzf &>/dev/null; then
-        if [[ -z "$($cmd inbox)" ]]; then
+        local data
+        data=$($cmd inbox --ansi)
+        if [[ -z "$data" ]]; then
             tmux display-message "No notifications"
             return 0
         fi
-        inbox_popup "$cmd"
+        inbox_popup "$cmd" "$data"
     else
         inbox_menu "$cmd"
     fi

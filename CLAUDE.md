@@ -124,6 +124,13 @@ See `inbox.py`, `cli.py:cmd_inbox()`, `_format_inbox_lines()`
 - `@hop-inbox-key` (default: "i"): opens an fzf popup (enter: jump, ctrl-x:
   clear all) with display-menu fallback when fzf/popup is unavailable
 - Max 50 entries stored, displays 20 most recent (priority order: waiting → idle, each group newest first; stale waiting panes auto-flip to idle)
+- Self-heal on read: hooks only fire on graceful exits, so killed panes/windows
+  and kill -9'd claude processes leave entries behind. `cmd_inbox()` prunes
+  entries whose pane is gone or no longer runs claude (clearing stale pane
+  state too); `prune` also removes inbox entries alongside pane state. No
+  periodic scan needed — opening the inbox is the validation point. A failed
+  process scan (`get_running_claude_pane_ids()` → None) only prunes gone panes,
+  never killed-claude candidates
 - Entries render as aligned columns — state icon (honors `@hop-status-format`),
   session:window, project, branch, time ago, wait reason, task summary —
   padded to the widest cell; columns empty across all entries are dropped.

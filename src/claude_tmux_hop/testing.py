@@ -1869,6 +1869,149 @@ def test_inbox_lines_alignment() -> list[TestResult]:
     return results
 
 
+def test_self_heal_ps_failure() -> list[TestResult]:
+    """A failed process scan (None) must not mass-prune live sessions."""
+    import time
+
+    from . import cli, inbox, tmux
+    from .tmux import PaneInfo
+
+    results = []
+    now = int(time.time())
+
+    # get_stale_panes: unknown liveness → nothing is stale.
+    original_running = tmux.get_running_claude_pane_ids
+    try:
+        tmux.get_running_claude_pane_ids = lambda: None
+        results.append(TestResult(
+            "ps_failure__get_stale_panes_empty",
+            tmux.get_stale_panes() == [],
+            f"Expected [] on scan failure, got {tmux.get_stale_panes()}",
+        ))
+    finally:
+        tmux.get_running_claude_pane_ids = original_running
+
+    # cmd_inbox: gone panes still prune via tmux state; killed-claude
+    # candidates are kept (can't be judged without ps).
+    original_file = inbox.INBOX_FILE
+    originals = {
+        name: getattr(cli, name)
+        for name in ("get_hop_panes", "get_running_claude_pane_ids",
+                     "validate_waiting_panes", "clear_pane_state", "get_global_option")
+    }
+    cleared: list[str] = []
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8")
+    try:
+        for pane_id in ("%1", "%2"):
+            tmp.write(json.dumps({
+                "ts": now - 60, "state": "idle", "project": "demo",
+                "pane_id": pane_id, "session": "main", "window": 0,
+            }, separators=(",", ":")) + "\n")
+        tmp.close()
+        inbox.INBOX_FILE = Path(tmp.name)
+
+        cli.get_hop_panes = lambda validate=True: [
+            PaneInfo(id="%1", state="idle", timestamp=now - 60, cwd="", session="main", window=0),
+        ]
+        cli.get_running_claude_pane_ids = lambda: None
+        cli.validate_waiting_panes = lambda panes: []
+        cli.clear_pane_state = lambda pane_id=None: cleared.append(pane_id)
+        cli.get_global_option = lambda name, default="": default
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.cmd_inbox(argparse.Namespace(ansi=False))
+        lines = [line for line in out.getvalue().splitlines() if line]
+
+        results.append(TestResult(
+            "ps_failure__keeps_stateful_pane",
+            len(lines) == 1 and lines[0].endswith("\t%1"),
+            f"Expected %1 kept and %2 (gone pane) pruned, got {lines}",
+        ))
+        results.append(TestResult(
+            "ps_failure__no_state_cleared",
+            cleared == [],
+            f"Expected no clear_pane_state calls, got {cleared}",
+        ))
+    finally:
+        for name, fn in originals.items():
+            setattr(cli, name, fn)
+        inbox.INBOX_FILE = original_file
+        Path(tmp.name).unlink(missing_ok=True)
+
+    return results
+
+
+def test_inbox_self_heal() -> list[TestResult]:
+    """`cmd_inbox` prunes entries for dead panes and stale claude processes."""
+    import time
+
+    from . import cli, inbox
+    from .tmux import PaneInfo
+
+    results = []
+    now = int(time.time())
+
+    original_file = inbox.INBOX_FILE
+    originals = {
+        name: getattr(cli, name)
+        for name in ("get_hop_panes", "get_running_claude_pane_ids",
+                     "validate_waiting_panes", "clear_pane_state", "get_global_option")
+    }
+    cleared: list[str] = []
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8")
+    try:
+        # %1: live pane + running claude (kept)
+        # %2: pane gone entirely (pruned)
+        # %3: pane alive with state but claude killed (pruned + state cleared)
+        for pane_id in ("%1", "%2", "%3"):
+            tmp.write(json.dumps({
+                "ts": now - 60, "state": "idle", "project": "demo",
+                "pane_id": pane_id, "session": "main", "window": 0,
+            }, separators=(",", ":")) + "\n")
+        tmp.close()
+        inbox.INBOX_FILE = Path(tmp.name)
+
+        panes = [
+            PaneInfo(id="%1", state="idle", timestamp=now - 60, cwd="", session="main", window=0),
+            PaneInfo(id="%3", state="idle", timestamp=now - 60, cwd="", session="main", window=0),
+        ]
+        cli.get_hop_panes = lambda validate=True: panes
+        cli.get_running_claude_pane_ids = lambda: {"%1"}
+        cli.validate_waiting_panes = lambda panes: []
+        cli.clear_pane_state = lambda pane_id=None: cleared.append(pane_id)
+        cli.get_global_option = lambda name, default="": default
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            cli.cmd_inbox(argparse.Namespace(ansi=False))
+        lines = [line for line in out.getvalue().splitlines() if line]
+
+        results.append(TestResult(
+            "inbox_self_heal__keeps_live_pane",
+            len(lines) == 1 and lines[0].endswith("\t%1"),
+            f"Expected only %1 to remain, got {lines}",
+        ))
+        results.append(TestResult(
+            "inbox_self_heal__clears_stale_pane_state",
+            cleared == ["%3"],
+            f"Expected clear_pane_state for %3 only, got {cleared}",
+        ))
+        remaining = {e.pane_id for e in inbox.get_entries()}
+        results.append(TestResult(
+            "inbox_self_heal__rewrites_jsonl",
+            remaining == {"%1"},
+            f"Expected jsonl to contain only %1, got {remaining}",
+        ))
+    finally:
+        for name, fn in originals.items():
+            setattr(cli, name, fn)
+        inbox.INBOX_FILE = original_file
+        Path(tmp.name).unlink(missing_ok=True)
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -1885,6 +2028,8 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_inbox_entry_task_backcompat())
     all_results.extend(test_git_identity())
     all_results.extend(test_inbox_lines_alignment())
+    all_results.extend(test_inbox_self_heal())
+    all_results.extend(test_self_heal_ps_failure())
     all_results.extend(test_cmd_list_json())
     all_results.extend(test_register_arg_parsing())
     all_results.extend(test_state_icon_from_status_format())

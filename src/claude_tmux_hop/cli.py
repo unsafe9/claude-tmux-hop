@@ -27,6 +27,7 @@ from .tmux import (
     get_git_identity,
     get_global_option,
     get_hop_panes,
+    get_running_claude_pane_ids,
     get_stale_panes,
     has_hop_state,
     has_session,
@@ -762,8 +763,10 @@ def cmd_prune(args: argparse.Namespace) -> int:
             if not args.quiet:
                 print(f"Removed: {pane.id} ({pane.session}:{pane.window}) - {pane.project}")
 
-    if not args.dry_run and not args.quiet:
-        print(f"\nPruned {len(stale)} stale pane(s)")
+    if not args.dry_run:
+        inbox.remove_panes({pane.id for pane in stale})
+        if not args.quiet:
+            print(f"\nPruned {len(stale)} stale pane(s)")
 
     return 0
 
@@ -859,12 +862,34 @@ def cmd_inbox(args: argparse.Namespace) -> int:
     """Output inbox entries for the fzf popup / display menu (internal use).
 
     Outputs one aligned line per entry; --ansi adds per-column colors for fzf.
+
+    Hooks only fire on graceful exits, so killed panes/windows and kill -9'd
+    claude processes leave entries (and pane state) behind forever. Opening
+    the inbox is the natural validation point: entries whose pane is gone or
+    no longer runs claude are pruned here, and stale pane state is cleared.
     """
-    validate_waiting_panes(get_hop_panes(validate=False))
+    panes = get_hop_panes(validate=False)
+    validate_waiting_panes(panes)
+
     entries = inbox.get_entries()
     if not entries:
         return 0
 
+    running = get_running_claude_pane_ids()
+    state_ids = {p.id for p in panes}
+    # A failed process scan (None) still prunes gone panes via tmux state,
+    # but can't judge killed-claude panes — keep those over mass-pruning.
+    live_ids = state_ids if running is None else state_ids & running
+    dead_ids = {e.pane_id for e in entries if e.pane_id not in live_ids}
+    if dead_ids:
+        for pane in panes:
+            if pane.id in dead_ids:  # stale state on a live pane (killed claude)
+                clear_pane_state(pane.id)
+        inbox.remove_panes(dead_ids)
+        log_info(f"inbox: pruned {len(dead_ids)} dead entries")
+        entries = [e for e in entries if e.pane_id not in dead_ids]
+        if not entries:
+            return 0
     for line in _format_inbox_lines(entries, use_ansi=bool(getattr(args, "ansi", False))):
         print(line)
 

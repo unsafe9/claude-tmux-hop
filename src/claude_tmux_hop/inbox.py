@@ -149,15 +149,25 @@ def get_entries(limit: int = DEFAULT_DISPLAY_LIMIT) -> list[InboxEntry]:
 
 def remove_pane(pane_id: str) -> None:
     """Remove all entries for a pane from the inbox."""
+    remove_panes({pane_id})
+
+
+def remove_panes(pane_ids: set[str]) -> None:
+    """Remove all entries for the given panes in a single file rewrite."""
+    if not pane_ids:
+        return
     try:
         # record() uses compact separators, so the key format is deterministic
-        needle = f'"pane_id":"{pane_id}"'
+        needles = {f'"pane_id":"{pid}"' for pid in pane_ids}
         content = INBOX_FILE.read_text()
-        # Active-state hooks fire this on every transition; skipping the
-        # rewrite when the pane has no entry saves a write + fsync per call.
-        if needle not in content:
+        # Active-state hooks fire remove_pane on every transition; skipping
+        # the rewrite when no pane has an entry saves a write + fsync per call.
+        if not any(needle in content for needle in needles):
             return
-        filtered = [line for line in content.splitlines() if line.strip() and needle not in line]
+        filtered = [
+            line for line in content.splitlines()
+            if line.strip() and not any(needle in line for needle in needles)
+        ]
 
         if filtered:
             INBOX_FILE.write_text("\n".join(filtered) + "\n")
