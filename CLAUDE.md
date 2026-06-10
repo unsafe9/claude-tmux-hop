@@ -36,7 +36,7 @@ src/claude_tmux_hop/
     windows.py    # Windows: PowerShell toast, COM focus, Win32 detection
     terminals.py  # Terminal app detection mappings (bundle IDs, env vars)
 hooks/
-  hooks.json      # Hook definitions (9 hooks)
+  hooks.json      # Hook definitions
 skills/
   hop-status/SKILL.md       # Skill: summarize all tracked Claude sessions and states
   hop-config/SKILL.md       # Skill: inspect and edit @hop-* tmux options (persistent) + update conductor instructions
@@ -46,36 +46,8 @@ hop.tmux          # TPM plugin entry point
 
 ## CLI Commands
 
-See `cli.py:main()` for full command definitions.
-
-```bash
-claude-tmux-hop <command>
-  # Core commands
-  register --state <s> [--reason <r>]  # Set state: waiting|idle|active (+ wait reason)
-  clear                   # Remove hop state from pane
-  cycle                   # Jump to next pane (priority order)
-  back                    # Jump back to previous pane
-  picker-data             # Output picker data for fzf
-  switch <pane_id>        # Switch to specific pane (internal)
-  list                    # Show all panes (auto-validates)
-  discover                # Auto-discover Claude sessions
-  prune                   # Remove stale panes
-  status                  # Output status bar string
-  inbox                   # Output notification inbox for display menu
-  inbox-clear             # Clear notification inbox
-
-  # Conductor primitives
-  spawn-task              # New window + claude + prompt (in target session)
-  send-prompt             # Inject prompt into existing claude pane
-  conductor               # Open conductor popup or update its CLAUDE.md marker block
-  conductor-context       # Internal: SessionStart hook emits in-memory instructions
-  conductor-prompt-context # Internal: UserPromptSubmit hook emits fresh pane snapshot
-  list --json             # Same listing as `list`, plus per-pane git context
-
-  # Management commands
-  install                 # Install tmux/claude plugins
-  update                  # Update installed plugins
-```
+Subcommands, flags, and help text are defined in `parser.py`; each maps to a
+`cli.py:cmd_<name>()` handler.
 
 ## Key Patterns
 
@@ -183,22 +155,21 @@ each other.
 ### Conductor
 See `cli.py:cmd_conductor()`, `cli.py:cmd_conductor_context()`, `cli.py:cmd_conductor_prompt_context()`, `tmux.py:spawn_conductor_session()`, `kill_session_if_exists()`, `spawn_window()`, `send_prompt_to_pane()`, `resolve_conductor_dir()`, `install.py:update_conductor_instructions()`.
 - **Opt-in**: disabled by default. Enable with `tmux set -g @hop-conductor-enabled on` (also `1`/`true`/`yes`). While off, no keybinding registers and `conductor --popup` refuses with a hint. `--update-instructions`, `--kill`, `list --json`, `spawn-task`, `send-prompt`, `conductor-context`, `conductor-prompt-context` work regardless — they are general primitives, not conductor-gated.
-- **Persistent background session model**: the conductor lives in a detached tmux session (default name `conductor`, configurable via `@hop-conductor-session`). The popup is just a *viewer* attached via `tmux attach`. `prefix + d` inside the popup detaches without killing claude — anything in-flight (a dispatch loop, a long tool call) keeps running. Re-pressing `prefix + y` re-attaches to the same claude. The session is spawned by `spawn_conductor_session()` with `tmux new-session -d -e CLAUDE_TMUX_HOP_CONDUCTOR=1 -e PATH=<own-bin>:$PATH -s <session> -c <workbench> 'exec claude'`. `exec claude` ensures the session ends when claude exits, so the next attach attempt auto-recovers.
+- **Persistent background session model**: the conductor lives in a detached tmux session (default name `conductor`, configurable via `@hop-conductor-session`). The popup is just a *viewer* attached via `tmux attach`. `prefix + d` inside the popup detaches without killing claude — anything in-flight (a dispatch loop, a long tool call) keeps running. Re-pressing `prefix + y` re-attaches to the same claude. The session is spawned by `spawn_conductor_session()` running `exec claude`, which ties the session's lifetime to claude — when claude exits the session dies, so the next attach attempt auto-recovers.
 - Workbench dir = `@hop-conductor-dir` (default `~/.config/claude-tmux-hop/conductor/`, supports `~` and `$VAR` expansion). The user owns this directory entirely. `ensure_conductor_dir()` only creates the dir — **no CLAUDE.md is seeded**.
 - **Plugin-managed instructions live behind a marker.** The canonical 4-mode dispatch table + safety rules + orchestration patterns are kept in `install.py:CONDUCTOR_INSTRUCTIONS` wrapped by `<conductor-instructions>` / `</conductor-instructions>` XML tags. Inside the block = plugin-owned (replaced by `--update-instructions`). Outside the block = user-owned (preserved across updates). Running `--update-instructions` while the conductor session is alive does **not** affect the running claude (it read CLAUDE.md once at startup) — the user must `prefix + Y` to respawn for the new canon to take effect.
 - **SessionStart hook injects in-memory** when the workbench has no marker. `cmd_conductor_context()` runs on every Claude SessionStart but no-ops unless cwd == workbench AND `CLAUDE.md` lacks the marker. When it does fire, it emits `additionalContext` (model-only, the canonical instructions) plus `systemMessage` (user-only, hint to run `--update-instructions` to persist). If the marker is already in `CLAUDE.md`, no-op — claude reads it as cwd context naturally.
 - **UserPromptSubmit hook injects fresh snapshot** every turn. `cmd_conductor_prompt_context()` runs on every Claude UserPromptSubmit but no-ops unless cwd == workbench. When it fires, it emits `additionalContext` (model-only) containing the same JSON shape as `list --json` (pane id, state, cwd, branch, worktree_root, project, ai-title `task`, etc.) so the conductor model never has to manually call `hop-status` or `list --json` per turn. The hook is defensive — any error (no tmux, unreadable options) is swallowed silently.
-- **`CLAUDE_TMUX_HOP_CONDUCTOR=1` env var is the fast-path gate.** Injected via `tmux new-session -e` at session creation, so it propagates to every shell/pane in the conductor session (including any windows the user manually creates inside it). The two conductor-related hook commands in `hooks/hooks.json` are wrapped as `[ "$CLAUDE_TMUX_HOP_CONDUCTOR" = 1 ] && ... || true` so non-conductor Claude sessions skip the Python interpreter entirely (~108ms saved per prompt per session in our benchmarks). The cwd check inside the CLI handlers remains as a second guard for the edge case of someone exporting the var manually outside the conductor session.
+- **`CLAUDE_TMUX_HOP_CONDUCTOR=1` env var is the fast-path gate.** Injected via `tmux new-session -e` at session creation, so it propagates to every shell/pane in the conductor session (including any windows the user manually creates inside it). The two conductor-related hook commands in `hooks/hooks.json` are shell-guarded on this var so non-conductor Claude sessions skip the Python interpreter entirely. The cwd check inside the CLI handlers remains as a second guard for the edge case of someone exporting the var manually outside the conductor session.
 - `@hop-conductor-popup-key` (default `y`): attach the popup to the conductor session (creates the session on demand) — prefix-key binding.
 - `@hop-conductor-respawn-key` (default `Y`): kill the conductor session first, then attach to a fresh claude. **Destructive** of any in-flight state. Use when the user wants a clean slate or needs to pick up updated canon after `--update-instructions`.
 - `@hop-conductor-session` (default `conductor`): both the *spawn target* (the persistent session the plugin creates and attaches to) and a *filter source* — any tmux session with this name is excluded from `get_hop_panes()`, `get_claude_panes_by_process()`, and `inbox.record()` so the conductor itself never pollutes cycle/picker/discover/inbox.
-- Subcommands:
-  - `conductor --popup [--respawn] | --update-instructions [--force] | --kill` — attach the popup (with `--respawn`, kill the session first); refresh the plugin-managed marker block in the workbench `CLAUDE.md`; or tear down the conductor session without opening a popup. `--force` (with `--update-instructions`) is required if `CLAUDE.md` exists without a marker; it backs up the file to `CLAUDE.md.bak` before overwriting. `--kill` is idempotent (no-op if no session).
-  - `conductor-context` — internal, invoked by SessionStart hook.
-  - `conductor-prompt-context` — internal, invoked by UserPromptSubmit hook; emits fresh pane snapshot when cwd == workbench.
+- Subcommands (flags live in `parser.py` / the `hop-dispatch` skill):
+  - `conductor` — `--popup` attaches the viewer (`--respawn` kills the session first); `--update-instructions` refreshes the plugin-managed marker block in the workbench `CLAUDE.md` (requires `--force` when a markerless `CLAUDE.md` exists; backs it up to `CLAUDE.md.bak`); `--kill` tears down the session, idempotent.
+  - `conductor-context` / `conductor-prompt-context` — internal, hook-invoked (SessionStart / UserPromptSubmit).
   - `list --json` — situational awareness (state + git context for each pane).
-  - `spawn-task --session --cwd --prompt [--window-name] [--no-switch]` — new window + new claude + prompt; creates session if missing.
-  - `send-prompt --pane --prompt [--no-switch] [--force]` — inject prompt into an existing claude pane. **CLI refuses `active` panes** unless `--force`.
+  - `spawn-task` — new window + new claude + prompt; creates the target session if missing.
+  - `send-prompt` — inject prompt into an existing claude pane. **CLI refuses `active` panes** unless forced.
 - Four dispatch modes the conductor picks among per task: (a) navigate via `switch`, (b) inject via `send-prompt`, (c) new window in project root via `spawn-task`, (d) new worktree (conductor runs `git worktree add` itself) then `spawn-task`. The conductor's instructions describe *which mode to pick*; the actual CLI shape for each mode lives in the `hop-dispatch` skill so flag changes only need to land in one place. The on-disk CONDUCTOR_INSTRUCTIONS marker block can go stale across plugin updates — the dispatch logic still works (skills travel with the binary) but the user is responsible for running `hop-config`'s "update conductor instructions" + `prefix + Y` (respawn) to pick up the refreshed copy.
 
 ### Hook Flow (hooks.json)
