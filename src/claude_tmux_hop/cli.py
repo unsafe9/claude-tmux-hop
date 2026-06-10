@@ -35,6 +35,7 @@ from .tmux import (
     get_hop_panes,
     get_running_claude_pane_ids,
     get_stale_panes,
+    get_window_states,
     has_hop_state,
     has_session,
     is_in_tmux,
@@ -43,7 +44,6 @@ from .tmux import (
     parse_state_set,
     rename_window,
     resolve_conductor_dir,
-    restore_window_auto_rename,
     run_tmux,
     send_prompt_to_pane,
     set_global_option,
@@ -185,6 +185,17 @@ def _get_state_icon(state: str) -> str:
     format_str = get_global_option("@hop-status-format", DEFAULT_STATUS_FORMAT)
     icons = {m.group(1): m.group(2).strip() for m in STATUS_FORMAT_TOKEN_RE.finditer(format_str)}
     return icons.get(state) or STATE_ICONS.get(state, "")
+
+
+def _best_window_state(states: list[str], fallback: str) -> str:
+    """Pick the highest-priority state among a window's panes.
+
+    With multiple claude panes in one window the icon surfaces the most
+    attention-worthy state rather than the last event's. Unknown states are
+    skipped; an empty or failed query falls back to the caller's own state.
+    """
+    known = [s for s in states if s in STATE_PRIORITY]
+    return min(known, key=lambda s: STATE_PRIORITY[s]) if known else fallback
 
 
 def _normalize_task(text: str) -> str:
@@ -435,8 +446,10 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Window names are navigation labels: the dir basename is stable and short
     # (worktree dirs carry the task hint), while the ai-title churns every
     # turn. The task summary stays visible via inbox/picker and @hop-task.
+    # The icon aggregates over the window's panes (own state was already
+    # persisted above) so co-located agents can't mask a waiting sibling.
     if is_window_rename_enabled():
-        icon = _get_state_icon(args.state)
+        icon = _get_state_icon(_best_window_state(get_window_states(), args.state))
         rename_window(f"{icon} {project}" if icon else project)
 
     # A new user turn resets notification dedup so the next waiting/idle
@@ -516,9 +529,13 @@ def cmd_clear(args: argparse.Namespace) -> int:
     log_cli_call("clear")
     clear_pane_state()
 
-    # Hand the window name back to tmux once claude exits.
+    # Keep the directory name as the window label once claude exits. State
+    # was cleared above, so the query only sees surviving sibling agents —
+    # their best-state icon stays; with none left the icon is dropped.
     if is_window_rename_enabled():
-        restore_window_auto_rename()
+        project = os.path.basename(os.getcwd())
+        icon = _get_state_icon(_best_window_state(get_window_states(), ""))
+        rename_window(f"{icon} {project}" if icon else project)
 
     log_info("clear: state cleared")
     return 0

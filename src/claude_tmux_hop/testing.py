@@ -1572,6 +1572,36 @@ def test_state_icon_from_status_format() -> list[TestResult]:
     return results
 
 
+def test_best_window_state() -> list[TestResult]:
+    """Window icon aggregation picks the highest-priority state among panes."""
+    from . import cli
+
+    results = []
+
+    results.append(TestResult(
+        "best_window_state__waiting_wins",
+        cli._best_window_state(["active", "waiting", "idle"], "active") == "waiting",
+        "Expected waiting to win over idle/active",
+    ))
+    results.append(TestResult(
+        "best_window_state__idle_over_active",
+        cli._best_window_state(["active", "idle"], "active") == "idle",
+        "Expected idle to win over active",
+    ))
+    results.append(TestResult(
+        "best_window_state__unknown_skipped",
+        cli._best_window_state(["bogus", "active"], "waiting") == "active",
+        "Expected unknown states to be skipped",
+    ))
+    results.append(TestResult(
+        "best_window_state__empty_falls_back",
+        cli._best_window_state([], "idle") == "idle",
+        "Expected fallback on empty query",
+    ))
+
+    return results
+
+
 def test_notify_dedup_cooldown() -> list[TestResult]:
     """Duplicate notifications within the cooldown are detected via the pane stamp."""
     import time as _time
@@ -2054,6 +2084,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_cmd_list_json())
     all_results.extend(test_register_arg_parsing())
     all_results.extend(test_state_icon_from_status_format())
+    all_results.extend(test_best_window_state())
     all_results.extend(test_notify_dedup_cooldown())
     all_results.extend(test_spawn_task_arg_parsing())
     all_results.extend(test_send_prompt_arg_parsing())

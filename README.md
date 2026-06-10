@@ -125,8 +125,9 @@ set -g status-right '#{E:@hop-status} | %H:%M'
 # Renames the tmux window to "<state-icon> <directory name>" so the state icon
 # stays current while the name remains a stable label (worktree directories
 # naturally distinguish parallel work). State icons honor your
-# @hop-status-format tokens. tmux automatic-rename is restored when the
-# session ends.
+# @hop-status-format tokens; with multiple Claude panes in one window the
+# icon shows the highest-priority state among them. When a session ends, the
+# directory name stays as the window label and only the icon is dropped.
 set -g @hop-window-rename 'on'
 
 # Conductor (default: off) - see the Conductor section below

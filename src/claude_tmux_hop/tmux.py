@@ -285,14 +285,15 @@ def rename_window(name: str, pane_id: str | None = None) -> None:
     run_tmux("rename-window", *target, "--", name, check=False)
 
 
-def restore_window_auto_rename(pane_id: str | None = None) -> None:
-    """Re-enable tmux automatic-rename for the window containing a pane.
+def get_window_states(pane_id: str | None = None) -> list[str]:
+    """Get the `@hop-state` values of all panes in a pane's window.
 
-    rename-window disables automatic-rename for the window, so SessionEnd
-    restores it — otherwise the last task title would stick after claude exits.
+    A pane target makes list-panes window-scoped, so this stays a single
+    cheap tmux call (no global scan, no process validation).
     """
     target = _pane_target_args(pane_id)
-    run_tmux("set-option", "-w", *target, "automatic-rename", "on", check=False)
+    output = run_tmux("list-panes", *target, "-F", "#{@hop-state}", check=False)
+    return [state for state in output.split("\n") if state]
 
 
 def get_global_option(name: str, default: str = "") -> str:
