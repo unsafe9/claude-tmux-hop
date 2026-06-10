@@ -131,6 +131,9 @@ See `inbox.py`, `cli.py:cmd_inbox()`, `_format_inbox_lines()`
   periodic scan needed — opening the inbox is the validation point. A failed
   process scan (`get_running_claude_pane_ids()` → None) only prunes gone panes,
   never killed-claude candidates
+- Legacy entries (recorded before git identity existed, no "branch" key) are
+  upgraded in place on read via `inbox.backfill_git_identity()` from each
+  pane's current cwd — one git call per legacy entry ever
 - Entries render as aligned columns — state icon (honors `@hop-status-format`),
   session:window, project, branch, time ago, wait reason, task summary —
   padded to the widest cell; columns empty across all entries are dropped.

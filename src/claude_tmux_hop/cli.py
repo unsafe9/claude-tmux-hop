@@ -890,6 +890,13 @@ def cmd_inbox(args: argparse.Namespace) -> int:
         entries = [e for e in entries if e.pane_id not in dead_ids]
         if not entries:
             return 0
+
+    # Upgrade pre-git-identity entries from their pane's current cwd; reload
+    # so this open already shows the fixed project/branch.
+    cwd_by_pane = {p.id: p.cwd for p in panes if p.id in live_ids}
+    if inbox.backfill_git_identity(cwd_by_pane, get_git_identity):
+        entries = inbox.get_entries()
+
     for line in _format_inbox_lines(entries, use_ansi=bool(getattr(args, "ansi", False))):
         print(line)
 

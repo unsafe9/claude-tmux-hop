@@ -177,6 +177,54 @@ def remove_panes(pane_ids: set[str]) -> None:
         pass
 
 
+def backfill_git_identity(cwd_by_pane: dict[str, str], resolve) -> bool:
+    """Upgrade legacy entries (recorded before git identity existed) in place.
+
+    Lines without a "branch" key get project/branch re-resolved from their
+    pane's *current* cwd via `resolve` (= tmux.get_git_identity, injected to
+    keep this module tmux-free). Upgraded lines gain the key, so each legacy
+    entry costs one git call ever. Returns True when the file was rewritten.
+    """
+    if not cwd_by_pane:
+        return False
+    try:
+        lines = INBOX_FILE.read_text().splitlines()
+    except OSError:
+        return False
+
+    upgrades: dict[str, str] = {}
+    for line in lines:
+        # Compact separators make the key format deterministic; the substring
+        # test is just a fast-path filter before parsing.
+        if not line.strip() or '"branch"' in line:
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        cwd = cwd_by_pane.get(d.get("pane_id", ""))
+        if "branch" in d or not cwd:
+            continue
+        branch, repo = resolve(cwd)
+        if repo:
+            d["project"] = repo
+        d["branch"] = branch
+        upgrades[line] = json.dumps(d, separators=(",", ":"))
+
+    if not upgrades:
+        return False
+
+    # resolve() ran git per legacy entry above, so re-read just before the
+    # rewrite — a register hook may have appended entries in that window.
+    try:
+        lines = INBOX_FILE.read_text().splitlines()
+        out = [upgrades.get(line, line) for line in lines if line.strip()]
+        INBOX_FILE.write_text("\n".join(out) + "\n")
+    except OSError:
+        return False
+    return True
+
+
 def clear() -> None:
     """Clear all inbox entries."""
     try:

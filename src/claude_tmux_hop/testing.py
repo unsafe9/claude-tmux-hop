@@ -1942,6 +1942,63 @@ def test_self_heal_ps_failure() -> list[TestResult]:
     return results
 
 
+def test_inbox_backfill_git_identity() -> list[TestResult]:
+    """Legacy entries (no "branch" key) get upgraded once from the live cwd."""
+    from . import inbox
+
+    results = []
+    original_file = inbox.INBOX_FILE
+    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8")
+    try:
+        # Legacy: no branch key. Modern: branch key present (must stay as-is).
+        tmp.write(json.dumps({
+            "ts": 1700000000, "state": "idle", "project": "feature-x-worktree",
+            "pane_id": "%1", "session": "main", "window": 0,
+        }, separators=(",", ":")) + "\n")
+        tmp.write(json.dumps({
+            "ts": 1700000010, "state": "idle", "project": "already-new",
+            "pane_id": "%2", "session": "main", "window": 0, "branch": "keep/me",
+        }, separators=(",", ":")) + "\n")
+        tmp.close()
+        inbox.INBOX_FILE = Path(tmp.name)
+
+        calls: list[str] = []
+
+        def resolve(cwd: str) -> tuple[str, str]:
+            calls.append(cwd)
+            return "feature/x", "myrepo"
+
+        changed = inbox.backfill_git_identity({"%1": "/wt/feature-x", "%2": "/repo"}, resolve)
+        by_pane = {e.pane_id: e for e in inbox.get_entries()}
+
+        results.append(TestResult(
+            "inbox_backfill__legacy_upgraded",
+            changed and by_pane["%1"].project == "myrepo" and by_pane["%1"].branch == "feature/x",
+            f"Expected upgraded legacy entry, got {by_pane.get('%1')}",
+        ))
+        results.append(TestResult(
+            "inbox_backfill__modern_untouched",
+            by_pane["%2"].project == "already-new" and by_pane["%2"].branch == "keep/me",
+            f"Modern entry must not be rewritten, got {by_pane.get('%2')}",
+        ))
+        results.append(TestResult(
+            "inbox_backfill__resolves_legacy_only",
+            calls == ["/wt/feature-x"],
+            f"Expected one resolve call for the legacy cwd, got {calls}",
+        ))
+
+        results.append(TestResult(
+            "inbox_backfill__second_run_noop",
+            not inbox.backfill_git_identity({"%1": "/wt/feature-x"}, resolve) and len(calls) == 1,
+            f"Second run must be a no-op, calls={calls}",
+        ))
+    finally:
+        inbox.INBOX_FILE = original_file
+        Path(tmp.name).unlink(missing_ok=True)
+
+    return results
+
+
 def test_inbox_self_heal() -> list[TestResult]:
     """`cmd_inbox` prunes entries for dead panes and stale claude processes."""
     import time
@@ -2030,6 +2087,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_inbox_lines_alignment())
     all_results.extend(test_inbox_self_heal())
     all_results.extend(test_self_heal_ps_failure())
+    all_results.extend(test_inbox_backfill_git_identity())
     all_results.extend(test_cmd_list_json())
     all_results.extend(test_register_arg_parsing())
     all_results.extend(test_state_icon_from_status_format())
