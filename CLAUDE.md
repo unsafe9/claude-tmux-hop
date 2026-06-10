@@ -25,8 +25,7 @@ src/claude_tmux_hop/
   priority.py     # State priority logic - see STATE_PRIORITY
   inbox.py        # Notification inbox - JSONL storage in ~/.local/state/claude-tmux-hop/inbox.jsonl
   paths.py        # XDG/TPM path detection - see get_tmux_config_paths()
-  doctor.py       # Environment checks - see run_all_checks()
-  install.py      # Installation & update logic
+  install.py      # Installation & update logic + environment checks (CheckResult)
   testing.py      # Self-tests - see run_all_tests()
   log.py          # Logging to ~/.local/state/claude-tmux-hop/hop.log
   notify/         # Notification & focus module (Strategy pattern)
@@ -76,7 +75,6 @@ claude-tmux-hop <command>
   # Management commands
   install                 # Install tmux/claude plugins
   update                  # Update installed plugins
-  doctor                  # Check environment
 ```
 
 ## Key Patterns

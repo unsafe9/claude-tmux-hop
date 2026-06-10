@@ -171,23 +171,3 @@ def get_plugin_install_dir() -> Path:
 
     # Default to traditional location
     return Path.home() / ".tmux" / "plugins"
-
-
-def plugin_in_config(plugin_name: str) -> Path | None:
-    """Check if a plugin is referenced in any tmux config file.
-
-    Args:
-        plugin_name: Name of the plugin to search for
-
-    Returns:
-        Path to the config file containing the plugin, or None.
-    """
-    for config_path in get_tmux_config_paths():
-        if config_path.exists():
-            try:
-                content = config_path.read_text()
-                if plugin_name in content:
-                    return config_path
-            except (OSError, UnicodeDecodeError):
-                continue
-    return None

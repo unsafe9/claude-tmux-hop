@@ -31,7 +31,6 @@ def create_parser(
     cmd_inbox_clear: CommandHandler,
     cmd_install: CommandHandler,
     cmd_update: CommandHandler,
-    cmd_doctor: CommandHandler,
     cmd_spawn_task: CommandHandler,
     cmd_send_prompt: CommandHandler,
     cmd_conductor: CommandHandler,
@@ -256,18 +255,6 @@ def create_parser(
         help="Component to update (default: all)",
     )
     update_parser.set_defaults(func=cmd_update)
-
-    # doctor command
-    doctor_parser = subparsers.add_parser(
-        "doctor",
-        help="Check environment and dependencies",
-    )
-    doctor_parser.add_argument(
-        "--json",
-        action="store_true",
-        help="Output results as JSON",
-    )
-    doctor_parser.set_defaults(func=cmd_doctor)
 
     # --- Conductor primitives ---
 

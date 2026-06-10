@@ -1177,32 +1177,6 @@ def cmd_conductor_prompt_context(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
-    """Check environment and dependencies."""
-    from .doctor import format_results, run_all_checks
-
-    log_cli_call("doctor", {"json": args.json})
-
-    results = run_all_checks()
-
-    required_failed = [r for r in results if not r.ok and r.required]
-
-    if args.json:
-        print(format_results(results, use_json=True))
-    else:
-        print("Environment Check\n")
-        print(format_results(results))
-        print()
-
-        # Summary
-        if required_failed:
-            print(f"FAIL: {len(required_failed)} required check(s) failed")
-        else:
-            print("OK: All required checks passed")
-
-    return 1 if required_failed else 0
-
-
 def main() -> int:
     """Main entry point."""
     parser = create_parser(
@@ -1220,7 +1194,6 @@ def main() -> int:
         cmd_inbox_clear=cmd_inbox_clear,
         cmd_install=cmd_install,
         cmd_update=cmd_update,
-        cmd_doctor=cmd_doctor,
         cmd_spawn_task=cmd_spawn_task,
         cmd_send_prompt=cmd_send_prompt,
         cmd_conductor=cmd_conductor,

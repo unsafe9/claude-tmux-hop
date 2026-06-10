@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from .doctor import check_claude_cli, check_fzf, check_tmux, check_tpm
 from .paths import (
     find_plugin_path,
+    find_tpm_path,
     get_active_tmux_config,
     get_plugin_install_dir,
 )
@@ -19,6 +20,96 @@ from .paths import (
 
 DEFAULT_COMMAND_TIMEOUT = 30
 PLUGIN_LIST_TIMEOUT = 10
+
+# Environment check constants
+CHECK_COMMAND_TIMEOUT = 5
+MAX_VERSION_DISPLAY_LENGTH = 50
+
+
+@dataclass
+class CheckResult:
+    """Result of an environment check."""
+
+    name: str
+    ok: bool
+    version: str | None = None
+    message: str | None = None
+    required: bool = True
+
+
+def check_tmux() -> CheckResult:
+    """Check tmux installation and version."""
+    try:
+        result = subprocess.run(
+            ["tmux", "-V"],
+            capture_output=True,
+            text=True,
+            timeout=CHECK_COMMAND_TIMEOUT,
+        )
+        if result.returncode != 0:
+            return CheckResult("tmux", False, message="Command failed")
+
+        version_str = result.stdout.strip()
+        # Parse "tmux 3.2a" -> (3, 2)
+        match = re.search(r"(\d+)\.(\d+)", version_str)
+        if match:
+            major, minor = int(match.group(1)), int(match.group(2))
+            if (major, minor) < (3, 0):
+                return CheckResult(
+                    "tmux",
+                    False,
+                    version_str,
+                    f"Requires 3.0+, found {major}.{minor}",
+                )
+
+        return CheckResult("tmux", True, version_str)
+    except FileNotFoundError:
+        return CheckResult("tmux", False, message="Not installed")
+    except subprocess.TimeoutExpired:
+        return CheckResult("tmux", False, message="Command timed out")
+
+
+def check_claude_cli() -> CheckResult:
+    """Check Claude Code CLI."""
+    try:
+        result = subprocess.run(
+            ["claude", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=CHECK_COMMAND_TIMEOUT,
+        )
+        if result.returncode == 0:
+            version = result.stdout.strip()
+            # Truncate long version strings
+            if len(version) > MAX_VERSION_DISPLAY_LENGTH:
+                version = version[:MAX_VERSION_DISPLAY_LENGTH - 3] + "..."
+            return CheckResult("claude", True, version)
+        return CheckResult("claude", False, message="Command failed")
+    except FileNotFoundError:
+        return CheckResult("claude", False, message="Not installed")
+    except subprocess.TimeoutExpired:
+        return CheckResult("claude", False, message="Command timed out")
+
+
+def check_tpm() -> CheckResult:
+    """Check TPM installation."""
+    tpm_path = find_tpm_path()
+    if tpm_path:
+        return CheckResult("tpm", True, message=str(tpm_path), required=False)
+    return CheckResult("tpm", False, message="Not found (optional)", required=False)
+
+
+def check_fzf() -> CheckResult:
+    """Check fzf installation."""
+    path = shutil.which("fzf")
+    if path:
+        return CheckResult("fzf", True, message=path, required=False)
+    return CheckResult(
+        "fzf",
+        False,
+        message="Not found (picker will use menu fallback)",
+        required=False,
+    )
 
 CONDUCTOR_MARKER_OPEN = "<conductor-instructions>"
 CONDUCTOR_MARKER_CLOSE = "</conductor-instructions>"
@@ -297,7 +388,6 @@ def detect_environment() -> dict[str, Any]:
     Returns:
         Dictionary with detection results for tmux, claude, tpm, fzf, and in_tmux.
     """
-    # Use doctor.py checks to avoid duplication
     tmux_result = check_tmux()
     claude_result = check_claude_cli()
     tpm_result = check_tpm()

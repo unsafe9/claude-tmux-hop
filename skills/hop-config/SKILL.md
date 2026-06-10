@@ -16,7 +16,7 @@ Trigger when the user asks to view or change anything the plugin documents as co
 Do **not** trigger when:
 - The user is asking about session *state* across panes — that's the `hop-status` skill.
 - The user is outside tmux (`$TMUX` unset). Tell them and stop.
-- The plugin isn't installed (no `@hop-status` global option, no `claude-tmux-hop` binary on PATH). Suggest `claude-tmux-hop doctor` or `install`.
+- The plugin isn't installed (no `@hop-status` global option, no `claude-tmux-hop` binary on PATH). Suggest `claude-tmux-hop install`.
 
 ## Option catalog
 

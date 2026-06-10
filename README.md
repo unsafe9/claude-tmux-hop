@@ -127,7 +127,6 @@ The CLI is bundled within each plugin and invoked automatically by tmux keybindi
 ```bash
 # From tmux plugin directory (e.g., ~/.tmux/plugins/claude-tmux-hop)
 ./bin/claude-tmux-hop list      # List all Claude Code panes
-./bin/claude-tmux-hop doctor    # Check environment
 ```
 
 ## How It Works

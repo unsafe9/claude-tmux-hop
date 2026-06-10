@@ -902,7 +902,6 @@ def _build_full_parser():
         cmd_inbox_clear=noop,
         cmd_install=noop,
         cmd_update=noop,
-        cmd_doctor=noop,
         cmd_spawn_task=noop,
         cmd_send_prompt=noop,
         cmd_conductor=noop,
