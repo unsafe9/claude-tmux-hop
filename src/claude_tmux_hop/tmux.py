@@ -509,60 +509,48 @@ def send_prompt_to_pane(pane_id: str, prompt: str, switch: bool = True) -> None:
             log_debug(f"send-prompt: switch_to_pane failed: {e}")
 
 
-def _is_interactive_claude_on_tty(tty: str) -> bool:
-    """Check if an interactive Claude Code session is running on a tty.
+def _interactive_claude_ttys() -> set[str] | None:
+    """Find every tty hosting an interactive Claude Code session in one ps scan.
 
-    Uses ps to get all processes on the tty and checks for 'claude' command
-    without -p/--print flags (which indicate non-interactive mode).
-
-    Args:
-        tty: The tty device path (e.g., "/dev/ttys042")
-
-    Returns:
-        True if an interactive Claude Code session is running.
+    Matches 'claude' commands (by basename) without -p/--print flags
+    (non-interactive mode). Returns tty names without the /dev/ prefix
+    (matching ps output), or None when ps itself failed — callers must treat
+    None as "unknown", not "nothing running", or a transient ps failure would
+    mass-prune live sessions.
     """
     try:
         result = subprocess.run(
-            ["ps", "-t", tty, "-o", "args="],
+            ["ps", "-eo", "tty=,args="],
             capture_output=True,
             text=True,
             check=False,
         )
-        if result.returncode != 0:
-            return False
-
-        for line in result.stdout.splitlines():
-            # Check if this is a claude command
-            # Match: "claude", "/path/to/claude", "claude arg1 arg2"
-            parts = line.split()
-            if not parts:
-                continue
-
-            cmd = parts[0]
-            # Get the base command name (handle paths like /usr/local/bin/claude)
-            cmd_name = os.path.basename(cmd)
-
-            if cmd_name.lower() == "claude":
-                # Check for non-interactive flags
-                args = parts[1:] if len(parts) > 1 else []
-                if "-p" in args or "--print" in args:
-                    continue  # Skip non-interactive mode
-                return True
-
-        return False
     except (subprocess.SubprocessError, OSError):
-        return False
+        return None
+    if result.returncode != 0:
+        return None
+
+    ttys: set[str] = set()
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        tty, cmd, args = parts[0], parts[1], parts[2:]
+        if tty.startswith("?"):  # no controlling terminal
+            continue
+        # Handle paths like /usr/local/bin/claude
+        if os.path.basename(cmd).lower() != "claude":
+            continue
+        if "-p" in args or "--print" in args:
+            continue  # Skip non-interactive mode
+        ttys.add(tty)
+    return ttys
 
 
-def get_claude_panes_by_process() -> list[dict]:
-    """Find all panes running interactive Claude Code by checking processes.
+def _claude_panes_from_ttys(claude_ttys: set[str]) -> list[dict]:
+    """Map ttys hosting interactive Claude Code to their tmux panes.
 
-    Uses ps to check processes on each pane's tty for the 'claude' command.
-    Excludes panes running Claude with -p/--print (non-interactive mode).
     Filters out the conductor session — it must never be cycled into.
-
-    Returns:
-        List of dicts with pane info for each Claude pane found.
     """
     output = run_tmux(
         "list-panes",
@@ -586,7 +574,7 @@ def get_claude_panes_by_process() -> list[dict]:
         if session == conductor_session:
             continue
 
-        if tty and _is_interactive_claude_on_tty(tty):
+        if tty and tty.removeprefix("/dev/") in claude_ttys:
             panes.append({
                 "id": pane_id,
                 "cwd": cwd,
@@ -597,13 +585,31 @@ def get_claude_panes_by_process() -> list[dict]:
     return panes
 
 
-def get_running_claude_pane_ids() -> set[str]:
+def get_claude_panes_by_process() -> list[dict]:
+    """Find all panes running interactive Claude Code by checking processes.
+
+    Returns:
+        List of dicts with pane info for each Claude pane found. A failed
+        process scan yields [] (callers like discover treat it as "none found").
+    """
+    claude_ttys = _interactive_claude_ttys()
+    if claude_ttys is None:
+        return []
+    return _claude_panes_from_ttys(claude_ttys)
+
+
+def get_running_claude_pane_ids() -> set[str] | None:
     """Get the set of pane IDs currently running interactive Claude Code.
 
     Returns:
-        Set of pane IDs (e.g., {"%0", "%5"}) running Claude Code.
+        Set of pane IDs (e.g., {"%0", "%5"}), or None when the process scan
+        failed and liveness cannot be determined. Callers that prune based on
+        this must skip pruning on None.
     """
-    return {p["id"] for p in get_claude_panes_by_process()}
+    claude_ttys = _interactive_claude_ttys()
+    if claude_ttys is None:
+        return None
+    return {p["id"] for p in _claude_panes_from_ttys(claude_ttys)}
 
 
 def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
@@ -682,8 +688,12 @@ def get_stale_panes() -> list[PaneInfo]:
 
     Returns:
         List of PaneInfo objects for stale panes that should be cleaned up.
+        Empty when the process scan failed — better to prune nothing than
+        to prune live sessions.
     """
     running_pane_ids = get_running_claude_pane_ids()
+    if running_pane_ids is None:
+        return []
     all_hop_panes = get_hop_panes(validate=False)
     return [p for p in all_hop_panes if p.id not in running_pane_ids]
 
