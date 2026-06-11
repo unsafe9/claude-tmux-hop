@@ -41,6 +41,7 @@ from .tmux import (
     is_in_tmux,
     is_window_rename_enabled,
     kill_session_if_exists,
+    option_is_set,
     parse_state_set,
     rename_window,
     resolve_conductor_dir,
@@ -127,9 +128,22 @@ ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[90m"
 _ANSI_YELLOW = "\033[33m"
 STATE_ANSI = {"waiting": _ANSI_YELLOW, "idle": "\033[32m", "active": "\033[36m"}
-# tmux #[fg=...] colors for the second status line (cmd_status_inbox), mirroring
-# STATE_ANSI's meaning; only the pending states are ever rendered there.
-STATE_TMUX_COLOR = {"waiting": "yellow", "idle": "green"}
+# Per-state badge styles for the second status line (cmd_status_inbox):
+# background-colored pills, mirroring STATE_ANSI's meaning; only the pending
+# states are ever rendered there. Space-separated attrs follow tmux's own
+# window-status-format convention. These are defaults — each is overridable
+# via the matching INBOX_STYLE_OPTIONS option; an empty override drops the
+# color (plain badge, still listed and clickable).
+STATE_TMUX_BADGE = {
+    "waiting": "fg=colour235 bg=colour143",  # muted khaki/gold
+    "idle": "fg=colour235 bg=colour108",  # muted sage green
+}
+# User-facing tmux options to recolor each badge (tmux style strings, e.g.
+# "fg=black bg=yellow"; empty to disable coloring). See README.
+INBOX_STYLE_OPTIONS = {
+    "waiting": "@hop-status-inbox-waiting-style",
+    "idle": "@hop-status-inbox-idle-style",
+}
 # Column order: icon, session:window, project, branch, time, reason, task.
 # The icon column ("") is colored per-state via STATE_ANSI instead.
 INBOX_COLUMN_STYLES = ("", "\033[35m", "", "\033[36m", _ANSI_DIM, _ANSI_YELLOW, "")
@@ -866,11 +880,20 @@ def cmd_status_inbox(args: argparse.Namespace) -> int:
     """Output the pending-pane list for a second tmux status line.
 
     Companion to cmd_status: that renders aggregate counts for the first
-    line, this renders one segment per attention-worthy pane —
+    line, this renders one badge per attention-worthy pane —
     `<state-icon> <dir-basename>`, the same shape as the window auto-rename
     label — for an optional second status line (`status-format[1]`).
-    State drives the segment color via tmux `#[fg=...]` codes. All pending
-    panes are listed; tmux truncates the line at the status-bar edge.
+    State drives a background-colored pill (STATE_TMUX_BADGE default, per-state
+    overridable via INBOX_STYLE_OPTIONS), so the line reads like the window
+    list rather than flat text. An empty override drops the color to a plain,
+    still-clickable badge. All pending panes are listed; tmux truncates the
+    line at the status-bar edge.
+
+    Each badge is wrapped in `#[range=pane|<id>]` so a mouse click hops to
+    that pane: tmux's default MouseDown1Status binding is `switch-client -t =`,
+    and `switch-client` to a pane target switches session, window, and pane —
+    so clicking works with no extra keybinding (the segment markers survive
+    the `#(...)` substitution the same way the `#[...]` style codes do).
 
     Deliberately light for the polling path: a plain pane-option read plus
     the shared ordering/dismiss filter (_pending_panes), with no self-heal,
@@ -883,11 +906,15 @@ def cmd_status_inbox(args: argparse.Namespace) -> int:
     segments = []
     for pane in pending:
         icon = _get_state_icon(pane.state)
-        color = STATE_TMUX_COLOR.get(pane.state, "default")
+        # An explicitly-set option wins (incl. "" to disable color); only an
+        # unset option falls back to the default badge style.
+        opt = INBOX_STYLE_OPTIONS[pane.state]
+        style = get_global_option(opt, "") if option_is_set(opt) else STATE_TMUX_BADGE[pane.state]
         label = f"{icon} {pane.project}".strip()
-        segments.append(f"#[fg={color}]{label}#[default]")
+        marker = f"#[range=pane|{pane.id} {style}]" if style else f"#[range=pane|{pane.id}]"
+        segments.append(f"{marker} {label} #[norange default]")
 
-    line = " │ ".join(segments)
+    line = " ".join(segments)
     if line:
         print(line, end="")
     return 0

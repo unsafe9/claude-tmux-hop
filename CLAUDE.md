@@ -69,11 +69,15 @@ What the code can't tell you fast. Follow the anchors for behavior.
 - `@hop-status` (counts) and `@hop-status-inbox` (pending-pane list, for a second
   status line) are status **sources the plugin sets** via `hop.tmux`; treat as
   internal, not user-edited. Both stay light for the polling path (no self-heal/scan).
-- `@hop-status-inbox` renders each pane as a bg-colored badge (`STATE_TMUX_BADGE`)
-  wrapped in `#[range=pane|<id>]`. Click-to-hop is **free**: tmux's default
+- `@hop-status-inbox` renders each pane as a bg-colored badge (`STATE_TMUX_BADGE`
+  default, per-state overridable via `INBOX_STYLE_OPTIONS`) wrapped in
+  `#[range=pane|<id>]`. Click-to-hop is **free**: tmux's default
   `MouseDown1Status` is `switch-client -t =`, and switch-client to a pane target
   moves session+window+pane — so no keybinding is registered. The `#[range=...]`
   markers survive the `#(...)` substitution exactly like the `#[fg=...]` style codes.
+- Empty style override = disable color, and it must be distinguishable from
+  unset (= use default). `get_global_option` collapses both to its default, so
+  the badge read goes through `option_is_set()` (the `-gq` presence check) first.
 
 ### Window auto-rename
 - `@hop-window-rename` (default off): window name = `<state-icon> <dir basename>`

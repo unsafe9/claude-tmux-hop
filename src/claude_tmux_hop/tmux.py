@@ -310,6 +310,17 @@ def get_global_option(name: str, default: str = "") -> str:
     return result if result else default
 
 
+def option_is_set(name: str) -> bool:
+    """True if a global tmux option is explicitly set, even to an empty value.
+
+    `show-option -gqv` returns empty for both unset and set-to-empty options,
+    so `get_global_option` can't tell "" (an explicit disable) from a missing
+    option. The `-q` form without `-v` prints the option line only when it is
+    set, which recovers that distinction.
+    """
+    return bool(run_tmux("show-option", "-gq", name, check=False))
+
+
 def set_global_option(name: str, value: str) -> None:
     """Set a tmux global option.
 

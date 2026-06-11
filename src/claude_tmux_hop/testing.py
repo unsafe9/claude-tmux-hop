@@ -1786,7 +1786,7 @@ def test_inbox_lines_alignment() -> list[TestResult]:
 
 
 def test_status_inbox_line() -> list[TestResult]:
-    """`status-inbox` renders pending panes as colored `<icon> <dir>` segments."""
+    """`status-inbox` renders pending panes as clickable `<icon> <dir>` badges."""
     from . import cli
     from .tmux import PaneInfo
 
@@ -1795,11 +1795,13 @@ def test_status_inbox_line() -> list[TestResult]:
 
     originals = {
         name: getattr(cli, name)
-        for name in ("get_hop_panes", "get_global_option", "is_in_tmux")
+        for name in ("get_hop_panes", "get_global_option", "is_in_tmux", "option_is_set")
     }
-    # Pin icon source to DEFAULT_STATUS_FORMAT and cleared-at to 0.
+    # Pin icon source to DEFAULT_STATUS_FORMAT and cleared-at to 0; no style
+    # override set, so badges use the STATE_TMUX_BADGE defaults.
     cli.get_global_option = lambda name, default="": default
     cli.is_in_tmux = lambda: True
+    cli.option_is_set = lambda name: False
     try:
         wi = cli._get_state_icon("waiting")
         ii = cli._get_state_icon("idle")
@@ -1818,13 +1820,37 @@ def test_status_inbox_line() -> list[TestResult]:
         results.append(TestResult(
             "status_inbox__exit_zero", rc == 0, f"Expected 0, got {rc}",
         ))
-        # waiting first (yellow), then idle (green); active excluded.
-        expected = f"#[fg=yellow]{wi} palm#[default] │ #[fg=green]{ii} myapp#[default]"
+        # waiting first (yellow badge), then idle (green badge); active excluded.
+        expected = (
+            f"#[range=pane|%2 fg=colour235 bg=colour143] {wi} palm #[norange default]"
+            f" #[range=pane|%1 fg=colour235 bg=colour108] {ii} myapp #[norange default]"
+        )
         results.append(TestResult(
             "status_inbox__order_color_active_excluded",
             out == expected,
             f"Expected {expected!r}, got {out!r}",
         ))
+
+        # Explicit empty style override disables color: plain badge, still
+        # wrapped in range=pane. option_is_set distinguishes it from unset.
+        style_opts = set(cli.INBOX_STYLE_OPTIONS.values())
+        cli.option_is_set = lambda name: name in style_opts
+        cli.get_global_option = lambda name, default="": "" if name in style_opts else default
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            cli.cmd_status_inbox(argparse.Namespace())
+        out = buf.getvalue()
+        expected_plain = (
+            f"#[range=pane|%2] {wi} palm #[norange default]"
+            f" #[range=pane|%1] {ii} myapp #[norange default]"
+        )
+        results.append(TestResult(
+            "status_inbox__style_override_disables_color",
+            out == expected_plain,
+            f"Expected {expected_plain!r}, got {out!r}",
+        ))
+        cli.get_global_option = lambda name, default="": default
+        cli.option_is_set = lambda name: False
 
         cli.get_hop_panes = lambda validate=True: [
             PaneInfo("%9", "active", now, "/repo/x", "main", 1),
@@ -1849,8 +1875,8 @@ def test_status_inbox_line() -> list[TestResult]:
         out = buf.getvalue()
         results.append(TestResult(
             "status_inbox__lists_all_no_cap",
-            out.count("#[default]") == 15,
-            f"Expected all 15 segments (tmux truncates), got {out.count('#[default]')}",
+            out.count("range=pane|") == 15,
+            f"Expected all 15 segments (tmux truncates), got {out.count('range=pane|')}",
         ))
     finally:
         for name, val in originals.items():

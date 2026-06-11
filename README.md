@@ -122,11 +122,21 @@ set -g status-right '#{E:@hop-status} | %H:%M'
 # set -g @hop-status-format '{waiting:W} {idle:I} {active:A}'  # ASCII icons
 
 # Second status line (optional) - list the panes needing attention as
-# "<state-icon> <directory name>" segments (waiting=yellow, idle=green),
-# so you see which sessions are waiting without opening the inbox.
+# background-colored "<state-icon> <directory name>" badges (waiting=yellow,
+# idle=green), so you see which sessions are waiting without opening the inbox.
+# With `mouse on`, clicking a badge jumps straight to that pane (it switches
+# session, window, and pane via tmux's default status-click binding).
 # Note: status 2 always reserves two rows, even when nothing is pending.
 # set -g status 2
 # set -g status-format[1] '#{E:@hop-status-inbox}'
+#
+# Badge colors are tmux style strings, overridable per state. Set to empty
+# to disable coloring (plain text — the state icon still distinguishes them,
+# and badges stay clickable).
+# set -g @hop-status-inbox-waiting-style 'fg=colour235 bg=colour143'  # default
+# set -g @hop-status-inbox-idle-style    'fg=colour235 bg=colour108'  # default
+# set -g @hop-status-inbox-waiting-style ''   # disable color for waiting
+# set -g @hop-status-inbox-idle-style    ''   # disable color for idle
 
 # Window auto-rename (default: off)
 # Renames the tmux window to "<state-icon> <directory name>" so the state icon
