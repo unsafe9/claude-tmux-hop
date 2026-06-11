@@ -27,6 +27,7 @@ def create_parser(
     cmd_discover: CommandHandler,
     cmd_prune: CommandHandler,
     cmd_status: CommandHandler,
+    cmd_status_inbox: CommandHandler,
     cmd_inbox: CommandHandler,
     cmd_inbox_clear: CommandHandler,
     cmd_install: CommandHandler,
@@ -197,6 +198,13 @@ def create_parser(
         help="Output status for tmux status bar",
     )
     status_parser.set_defaults(func=cmd_status)
+
+    # status-inbox command (second status line: pending pane list)
+    status_inbox_parser = subparsers.add_parser(
+        "status-inbox",
+        help="Output the pending-pane list for a second tmux status line",
+    )
+    status_inbox_parser.set_defaults(func=cmd_status_inbox)
 
     # inbox command (internal)
     inbox_parser = subparsers.add_parser(

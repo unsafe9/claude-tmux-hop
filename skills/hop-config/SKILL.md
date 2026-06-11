@@ -20,7 +20,7 @@ Do **not** trigger when:
 
 ## Option catalog
 
-These are the only options to touch. Everything else under `@hop-*` is internal runtime state (`@hop-state`, `@hop-timestamp`, `@hop-previous-pane`, `@hop-status`) and **must not** be edited — leave them alone.
+These are the only options to touch. Everything else under `@hop-*` is internal runtime state (`@hop-state`, `@hop-timestamp`, `@hop-previous-pane`, `@hop-status`, `@hop-status-inbox`) and **must not** be edited — leave them alone.
 
 | Option | Default | Valid values | What it does |
 |---|---|---|---|

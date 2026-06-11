@@ -842,6 +842,7 @@ def _build_full_parser():
         cmd_discover=noop,
         cmd_prune=noop,
         cmd_status=noop,
+        cmd_status_inbox=noop,
         cmd_inbox=noop,
         cmd_inbox_clear=noop,
         cmd_install=noop,
@@ -1784,6 +1785,80 @@ def test_inbox_lines_alignment() -> list[TestResult]:
     return results
 
 
+def test_status_inbox_line() -> list[TestResult]:
+    """`status-inbox` renders pending panes as colored `<icon> <dir>` segments."""
+    from . import cli
+    from .tmux import PaneInfo
+
+    results = []
+    now = 1700000000
+
+    originals = {
+        name: getattr(cli, name)
+        for name in ("get_hop_panes", "get_global_option", "is_in_tmux")
+    }
+    # Pin icon source to DEFAULT_STATUS_FORMAT and cleared-at to 0.
+    cli.get_global_option = lambda name, default="": default
+    cli.is_in_tmux = lambda: True
+    try:
+        wi = cli._get_state_icon("waiting")
+        ii = cli._get_state_icon("idle")
+
+        panes = [
+            PaneInfo("%1", "idle", now, "/repo/myapp", "work", 1),
+            PaneInfo("%2", "waiting", now - 60, "/repo/palm", "main", 2),
+            PaneInfo("%3", "active", now, "/repo/busy", "main", 3),
+        ]
+        cli.get_hop_panes = lambda validate=True: list(panes)
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            rc = cli.cmd_status_inbox(argparse.Namespace())
+        out = buf.getvalue()
+
+        results.append(TestResult(
+            "status_inbox__exit_zero", rc == 0, f"Expected 0, got {rc}",
+        ))
+        # waiting first (yellow), then idle (green); active excluded.
+        expected = f"#[fg=yellow]{wi} palm#[default] │ #[fg=green]{ii} myapp#[default]"
+        results.append(TestResult(
+            "status_inbox__order_color_active_excluded",
+            out == expected,
+            f"Expected {expected!r}, got {out!r}",
+        ))
+
+        cli.get_hop_panes = lambda validate=True: [
+            PaneInfo("%9", "active", now, "/repo/x", "main", 1),
+        ]
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            cli.cmd_status_inbox(argparse.Namespace())
+        results.append(TestResult(
+            "status_inbox__empty_when_no_pending",
+            buf.getvalue() == "",
+            f"Expected empty output, got {buf.getvalue()!r}",
+        ))
+
+        many = [
+            PaneInfo(f"%{i}", "idle", now - i, f"/repo/p{i}", "s", i)
+            for i in range(15)
+        ]
+        cli.get_hop_panes = lambda validate=True: list(many)
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            cli.cmd_status_inbox(argparse.Namespace())
+        out = buf.getvalue()
+        results.append(TestResult(
+            "status_inbox__lists_all_no_cap",
+            out.count("#[default]") == 15,
+            f"Expected all 15 segments (tmux truncates), got {out.count('#[default]')}",
+        ))
+    finally:
+        for name, val in originals.items():
+            setattr(cli, name, val)
+
+    return results
+
+
 def _patch_cmd_inbox_env(cli, panes, running, cleared):
     """Patch the cli attributes `cmd_inbox` touches; returns the originals."""
     originals = {
@@ -2076,6 +2151,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_extract_task_from_transcript())
     all_results.extend(test_git_identity())
     all_results.extend(test_inbox_lines_alignment())
+    all_results.extend(test_status_inbox_line())
     all_results.extend(test_inbox_self_heal())
     all_results.extend(test_self_heal_ps_failure())
     all_results.extend(test_inbox_identity_backfill())

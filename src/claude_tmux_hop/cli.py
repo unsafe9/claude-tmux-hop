@@ -127,6 +127,9 @@ ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[90m"
 _ANSI_YELLOW = "\033[33m"
 STATE_ANSI = {"waiting": _ANSI_YELLOW, "idle": "\033[32m", "active": "\033[36m"}
+# tmux #[fg=...] colors for the second status line (cmd_status_inbox), mirroring
+# STATE_ANSI's meaning; only the pending states are ever rendered there.
+STATE_TMUX_COLOR = {"waiting": "yellow", "idle": "green"}
 # Column order: icon, session:window, project, branch, time, reason, task.
 # The icon column ("") is colored per-state via STATE_ANSI instead.
 INBOX_COLUMN_STYLES = ("", "\033[35m", "", "\033[36m", _ANSI_DIM, _ANSI_YELLOW, "")
@@ -858,6 +861,38 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+@requires_tmux(silent=True)
+def cmd_status_inbox(args: argparse.Namespace) -> int:
+    """Output the pending-pane list for a second tmux status line.
+
+    Companion to cmd_status: that renders aggregate counts for the first
+    line, this renders one segment per attention-worthy pane —
+    `<state-icon> <dir-basename>`, the same shape as the window auto-rename
+    label — for an optional second status line (`status-format[1]`).
+    State drives the segment color via tmux `#[fg=...]` codes. All pending
+    panes are listed; tmux truncates the line at the status-bar edge.
+
+    Deliberately light for the polling path: a plain pane-option read plus
+    the shared ordering/dismiss filter (_pending_panes), with no self-heal,
+    process scan, or git backfill — cmd_inbox owns those on popup open.
+    """
+    # Don't log to avoid overhead in polling scenario
+
+    pending = _pending_panes(get_hop_panes(validate=False))
+
+    segments = []
+    for pane in pending:
+        icon = _get_state_icon(pane.state)
+        color = STATE_TMUX_COLOR.get(pane.state, "default")
+        label = f"{icon} {pane.project}".strip()
+        segments.append(f"#[fg={color}]{label}#[default]")
+
+    line = " │ ".join(segments)
+    if line:
+        print(line, end="")
+    return 0
+
+
 def _format_inbox_lines(entries: list[PaneInfo], use_ansi: bool = False) -> list[str]:
     """Render pending panes as aligned columns: "label<TAB>pane_id" lines.
 
@@ -1329,6 +1364,7 @@ def main() -> int:
         cmd_discover=cmd_discover,
         cmd_prune=cmd_prune,
         cmd_status=cmd_status,
+        cmd_status_inbox=cmd_status_inbox,
         cmd_inbox=cmd_inbox,
         cmd_inbox_clear=cmd_inbox_clear,
         cmd_install=cmd_install,

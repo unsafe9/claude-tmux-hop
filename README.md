@@ -121,6 +121,13 @@ set -g status-right '#{E:@hop-status} | %H:%M'
 # set -g @hop-status-format '{waiting:󰂜} {idle:󰄬}'            # Hide active
 # set -g @hop-status-format '{waiting:W} {idle:I} {active:A}'  # ASCII icons
 
+# Second status line (optional) - list the panes needing attention as
+# "<state-icon> <directory name>" segments (waiting=yellow, idle=green),
+# so you see which sessions are waiting without opening the inbox.
+# Note: status 2 always reserves two rows, even when nothing is pending.
+# set -g status 2
+# set -g status-format[1] '#{E:@hop-status-inbox}'
+
 # Window auto-rename (default: off)
 # Renames the tmux window to "<state-icon> <directory name>" so the state icon
 # stays current while the name remains a stable label (worktree directories

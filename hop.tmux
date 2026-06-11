@@ -190,6 +190,9 @@ main() {
     # Set up status format for use in status-left/status-right
     # Users can use #{E:@hop-status} in their tmux config
     tmux set-option -g @hop-status "#($cmd status)"
+    # Optional second status line: pending-pane list (see README).
+    # Users can use #{E:@hop-status-inbox} in status-format[1].
+    tmux set-option -g @hop-status-inbox "#($cmd status-inbox)"
 
     # Version check: compare tmux plugin with Claude Code plugin
     local tmux_version claude_plugin_path claude_version
