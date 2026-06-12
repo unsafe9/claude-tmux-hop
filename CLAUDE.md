@@ -96,6 +96,11 @@ What the code can't tell you fast. Follow the anchors for behavior.
   (and correct tab on macOS) is already focused, but **not** auto-hop (on the
   terminal ≠ on the right pane). Notify bodies dedup per pane within a cooldown,
   reset on every `active` register so each turn notifies fresh.
+- Auto-hop and app-focus fire **only on a real state transition**
+  (`set_pane_state` returns whether `@hop-state` changed): a re-asserted state
+  (e.g. `idle_prompt` re-firing after `Stop` already set `idle`) must not
+  re-yank focus to a pane the user already left. Only the OS notification —
+  which has its own fingerprint+cooldown dedup — runs on a re-register.
 - `notify/` is a Strategy pattern (`base.py` protocols, per-OS modules register in
   `__init__.py`); macOS click-to-focus uses `terminal-notifier` if installed, else
   AppleScript. Anchors: `cli.py:should_auto_hop()`, `notify/`.

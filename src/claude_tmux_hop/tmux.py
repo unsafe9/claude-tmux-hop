@@ -160,26 +160,35 @@ def _pane_target_args(pane_id: str | None) -> list[str]:
     return ["-t", resolved] if resolved else []
 
 
-def set_pane_state(state: str, pane_id: str | None = None, reason: str = "") -> None:
-    """Set the hop state for a pane.
+def set_pane_state(state: str, pane_id: str | None = None, reason: str = "") -> bool:
+    """Set the hop state for a pane, returning whether the state changed.
 
     Args:
         state: The state to set ("waiting", "idle", "active")
         pane_id: The pane ID, or None for current pane
         reason: Why the pane is waiting (stored only for "waiting" state)
+
+    Returns:
+        True if the new state differs from the pane's previous @hop-state
+        (a first-ever register, with no prior option, counts as a change).
+        Callers gate auto-hop / app-focus on this so a re-asserted state
+        (e.g. a repeated idle_prompt after Stop) doesn't re-yank focus.
     """
     target = _pane_target_args(pane_id)
     timestamp = str(int(time.time()))
-    # Single tmux invocation: ";" separates chained commands, and unsetting a
-    # never-set option mid-chain does not abort the chain. register is the
-    # hot path (every hook event), so the 3 writes share one subprocess.
-    args = ["set-option", "-p", *target, "@hop-state", state,
+    # Single tmux invocation: a leading show-option emits the prior state on
+    # stdout, then the ";"-chained set-options overwrite it silently (unsetting
+    # a never-set option mid-chain does not abort the chain). register is the
+    # hot path (every hook event), so the read + 3 writes share one subprocess.
+    args = ["show-option", "-pqv", *target, "@hop-state",
+            ";", "set-option", "-p", *target, "@hop-state", state,
             ";", "set-option", "-p", *target, "@hop-timestamp", timestamp]
     if state == "waiting" and reason:
         args += [";", "set-option", "-p", *target, "@hop-wait-reason", reason]
     else:
         args += [";", "set-option", "-p", *target, "-u", "@hop-wait-reason"]
-    run_tmux(*args)
+    prev_state = run_tmux(*args).strip()
+    return prev_state != state
 
 
 def set_pane_task(task: str, pane_id: str | None = None) -> None:

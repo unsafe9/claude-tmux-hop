@@ -440,7 +440,7 @@ def cmd_register(args: argparse.Namespace) -> int:
     """Register the current pane with a state."""
     reason = getattr(args, "reason", "") or ""
     log_cli_call("register", {"state": args.state, "reason": reason})
-    set_pane_state(args.state, reason=reason)
+    state_changed = set_pane_state(args.state, reason=reason)
     log_info(f"register: state set to {args.state}")
 
     # Hook payload is consumed once here: task resolution and the
@@ -489,11 +489,17 @@ def cmd_register(args: argparse.Namespace) -> int:
     # Focus and auto-hop are independent: app focus is an OS-level action,
     # tmux pane hopping is a tmux-level action. Both must be free to trigger
     # on the same event — e.g. user is already on the terminal but a
-    # different pane needs to come to the front.
+    # different pane needs to come to the front. Both are gated on a real
+    # state transition: re-asserting the same state (e.g. idle_prompt firing
+    # after Stop already set idle) must not re-yank focus to a pane the user
+    # has already left. The OS notification keeps its own dedup, so it still
+    # fires here regardless.
     detail = _notify_detail(args.state, payload, task)
-    handle_state_notifications(args.state, project, pane_context, detail)
+    handle_state_notifications(
+        args.state, project, pane_context, detail, allow_focus=state_changed
+    )
 
-    if should_auto_hop(args.state):
+    if state_changed and should_auto_hop(args.state):
         do_auto_hop(pane_context)
 
     return 0

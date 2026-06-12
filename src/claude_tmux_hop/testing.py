@@ -1648,6 +1648,66 @@ def test_notify_dedup_cooldown() -> list[TestResult]:
     return results
 
 
+def test_set_pane_state_transition() -> list[TestResult]:
+    """set_pane_state reports whether the state actually changed.
+
+    The prior @hop-state is read via a leading show-option in the same tmux
+    invocation; auto-hop / app-focus gate on the returned flag so a re-asserted
+    state (e.g. idle_prompt after Stop) doesn't re-yank focus to a left pane.
+    """
+    from . import tmux
+
+    results = []
+    prev = {"value": ""}
+    captured: dict = {}
+
+    def fake_run_tmux(*args, check=True):
+        captured["args"] = args
+        return prev["value"]
+
+    original = tmux.run_tmux
+    try:
+        tmux.run_tmux = fake_run_tmux
+
+        prev["value"] = ""
+        changed = tmux.set_pane_state("waiting", "%1", reason="permission")
+        results.append(TestResult(
+            "set_pane_state__first_register_is_change",
+            changed is True,
+            f"Expected True for first-ever register, got {changed}",
+        ))
+        results.append(TestResult(
+            "set_pane_state__reads_prior_in_same_call",
+            captured["args"][:2] == ("show-option", "-pqv"),
+            f"Expected leading show-option read, got {captured['args'][:4]}",
+        ))
+
+        prev["value"] = "idle"
+        results.append(TestResult(
+            "set_pane_state__same_state_not_a_change",
+            tmux.set_pane_state("idle", "%1") is False,
+            "Re-asserting idle must report no change",
+        ))
+
+        prev["value"] = "active"
+        results.append(TestResult(
+            "set_pane_state__transition_is_change",
+            tmux.set_pane_state("idle", "%1") is True,
+            "active→idle must report a change",
+        ))
+
+        prev["value"] = "idle\n"
+        results.append(TestResult(
+            "set_pane_state__strips_output_whitespace",
+            tmux.set_pane_state("idle", "%1") is False,
+            "Trailing tmux output whitespace must not count as a change",
+        ))
+    finally:
+        tmux.run_tmux = original
+
+    return results
+
+
 def test_git_identity() -> list[TestResult]:
     """`get_git_identity` resolves branch + main-repo name, also from worktrees."""
     import subprocess
@@ -2188,6 +2248,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_state_icon_from_status_format())
     all_results.extend(test_best_window_state())
     all_results.extend(test_notify_dedup_cooldown())
+    all_results.extend(test_set_pane_state_transition())
     all_results.extend(test_spawn_task_arg_parsing())
     all_results.extend(test_send_prompt_arg_parsing())
     all_results.extend(test_conductor_arg_parsing())

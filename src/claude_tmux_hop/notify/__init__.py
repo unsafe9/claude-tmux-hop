@@ -370,6 +370,7 @@ def handle_state_notifications(
     project: str,
     pane_context: PaneContext | None = None,
     detail: str = "",
+    allow_focus: bool = True,
 ) -> None:
     """Handle OS notification and terminal focus for a state change.
 
@@ -378,14 +379,21 @@ def handle_state_notifications(
     must happen whether or not the terminal app is already in front, so
     this function no longer communicates a skip signal back to the caller.
 
+    `allow_focus` is False when the register merely re-asserted the pane's
+    existing state (e.g. a repeated idle_prompt after Stop already set idle).
+    App-focus has no dedup of its own, so re-firing it would keep pulling the
+    user back to a pane they already left — gate it on a real transition. The
+    OS notification keeps its own fingerprint+cooldown dedup, so it still runs.
+
     `detail` enriches the notification body (permission message, question
     text, or task summary). Identical bodies for the same pane are
     deduplicated within NOTIFY_COOLDOWN_SECONDS.
     """
-    wants_focus = should_focus_app(state)
+    focus_enabled = should_focus_app(state)
     wants_notify = should_notify(state)
+    do_focus = focus_enabled and allow_focus
 
-    if not wants_focus and not wants_notify:
+    if not do_focus and not wants_notify:
         return
 
     # Resolve terminal identity once; the probe and the focus path both need it
@@ -398,7 +406,7 @@ def handle_state_notifications(
     # already looking at the terminal.
     already_focused = is_terminal_focused(app_name, session_name)
 
-    if wants_focus:
+    if do_focus:
         if already_focused:
             log_info(f"focus suppressed: terminal already focused ({state})")
         elif focus_terminal(app_name, session_name):
@@ -417,7 +425,7 @@ def handle_state_notifications(
             if pane_id and _is_duplicate_notification(pane_id, fingerprint):
                 log_info("notification suppressed: duplicate within cooldown")
                 return
-            click_context = None if wants_focus else pane_context
+            click_context = None if focus_enabled else pane_context
             if send_notification(title, message, click_context):
                 if pane_id:
                     _stamp_notification(pane_id, fingerprint)
