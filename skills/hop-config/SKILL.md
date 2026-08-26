@@ -20,7 +20,7 @@ Do **not** trigger when:
 
 ## Option catalog
 
-These are the only options to touch. Everything else under `@hop-*` is internal runtime state (`@hop-state`, `@hop-timestamp`, `@hop-previous-pane`, `@hop-status`, `@hop-status-inbox`) and **must not** be edited — leave them alone.
+These are the only options to touch. Everything else under `@hop-*` is internal runtime state (`@hop-state`, `@hop-timestamp`, `@hop-previous-pane`, `@hop-status`, `@hop-status-inbox`, `@hop-status-next`) and **must not** be edited — leave them alone.
 
 | Option | Default | Valid values | What it does |
 |---|---|---|---|
@@ -29,6 +29,7 @@ These are the only options to touch. Everything else under `@hop-*` is internal 
 | `@hop-back-key` | `C-Space` | tmux key | Prefix-table key to jump back to the previous pane. |
 | `@hop-inbox-key` | `i` | single key | Prefix-table key to open the notification inbox menu. |
 | `@hop-cycle-mode` | `priority` | `priority` \| `flat` | Cycle order. `priority` groups by state (waiting → idle → active); `flat` cycles in tmux's pane order. |
+| `@hop-cycle-feedback` | `on` | `on` \| `off` | Show a transient `[2/3 waiting] project · reason · age` message after each hop, so the position in the queue being swept is visible. `off` hops silently. |
 | `@hop-auto` | (empty) | comma list of `waiting`, `idle`, `active` | States that auto-switch the user to the target pane. Empty = disabled. |
 | `@hop-auto-priority-only` | `on` | `on` \| `off` | When `on`, suppress auto-hop if another pane is already at a higher-priority state. |
 | `@hop-notify` | (empty) | comma list of states | States that fire an OS notification (toast). Empty = disabled. |
@@ -38,6 +39,10 @@ These are the only options to touch. Everything else under `@hop-*` is internal 
 | `@hop-window-rename` | `off` | `on` \| `off` | Auto-rename the tmux window of each Claude pane to `<state-icon> <directory name>`, updated on every state change. State icons come from `@hop-status-format` tokens (fallback: built-in icons); with multiple Claude panes in one window the icon shows the highest-priority state among them. When the session ends, the directory name stays as the window label and only the icon is dropped. |
 | `@hop-status-inbox-waiting-style` | `fg=colour235 bg=colour143` | tmux style string, or empty | Background-colored badge style for `waiting` panes on the optional second status line (`#{E:@hop-status-inbox}`). Empty = no color (plain, still listed and clickable). |
 | `@hop-status-inbox-idle-style` | `fg=colour235 bg=colour108` | tmux style string, or empty | Same, for `idle` panes. |
+| `@hop-status-next-format` | `{icon} {project} {reason} {age}` | format string with `{icon}`, `{project}`, `{branch}`, `{reason}`, `{age}`, `{task}` tokens | Label for the single-slot "up next" badge rendered by `#{E:@hop-status-next}` — the top-priority pending pane alone. Tokens with nothing to show collapse, so a pane without a branch or wait reason leaves no gap. |
+| `@hop-status-next-style` | per-state badge style | tmux style string, or empty | Badge style for `#{E:@hop-status-next}`. Empty = no color (plain, still clickable). |
+| `@hop-inbox-preview` | `on` | `on` \| `off` | Show the highlighted pane's live content in a preview pane beside the inbox list, so the queue can be triaged without hopping. `ctrl-/` toggles it inside the popup. `off` restores the compact popup. fzf only; the `display-menu` fallback has no preview. |
+| `@hop-inbox-preview-lines` | `40` | positive integer | How many lines of the target pane the preview shows, counted from the bottom of its real content (capture padding is trimmed first). |
 | `@hop-conductor-enabled` | `off` | `on` \| `1` \| `true` \| `yes` (any other value = off) | **Master toggle** for the Conductor feature. Off by default — when off, no conductor keybinding registers and `conductor --popup` refuses. Other primitives (`spawn-task`, `send-prompt`, `list --json`, `conductor --update-instructions`, `conductor --kill`) work regardless. Flipping this to `off` does **not** auto-tear-down a running conductor session; this skill's disable workflow chains a `conductor --kill` after the option flip. |
 | `@hop-conductor-session` | `conductor` | tmux session name | Dual-purpose: (1) the tmux session the plugin spawns on first `prefix + y` and attaches the popup to, and (2) a filter source — any session with this name is excluded from cycle/picker/discover/inbox so the conductor itself never pollutes those flows. |
 | `@hop-conductor-dir` | (empty → XDG default) | absolute path; supports `~` and `$VAR` expansion | Workbench directory `tmux new-session -c …` uses when spawning the conductor session. The plugin creates the dir if missing but does **not** seed `CLAUDE.md`; the SessionStart hook injects canon in-memory when the workbench has no `<conductor-instructions>` marker, and the user can persist it with `conductor --update-instructions`. If you change this option while a conductor session is alive, the running session keeps its current cwd — kill the session (`conductor --kill`) before the next popup to pick up the new dir. |
@@ -139,7 +144,9 @@ For removals (user says "disable", "off"), write empty string (e.g. `@hop-auto`,
 
 **C. Targeted reload — only when needed.**
 
-Most options are read by the Python CLI on every call (`@hop-auto`, `@hop-auto-priority-only`, `@hop-notify`, `@hop-focus-app`, `@hop-terminal-app`, `@hop-status-format`, `@hop-window-rename`), so step B is enough — the change is live immediately and survives restart via step A.
+Most options are read by the Python CLI on every call (`@hop-auto`, `@hop-auto-priority-only`, `@hop-notify`, `@hop-focus-app`, `@hop-terminal-app`, `@hop-status-format`, `@hop-window-rename`, `@hop-cycle-feedback`, `@hop-status-next-format`, `@hop-status-next-style`), so step B is enough — the change is live immediately and survives restart via step A.
+
+`@hop-inbox-preview` and `@hop-inbox-preview-lines` are read by `hop.tmux`'s inbox function, which is sourced fresh on each keypress rather than baked into the binding, so they are also live immediately.
 
 But two categories of options are **baked into tmux bindings at plugin load time** by `hop.tmux:main()` and need a reload to take effect right now:
 

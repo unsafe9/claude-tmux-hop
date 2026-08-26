@@ -2675,6 +2675,83 @@ def test_cycle_feedback() -> list[TestResult]:
     return results
 
 
+def test_tmux_format_escaping() -> list[TestResult]:
+    """Pane-derived text reaches tmux escaped; user-authored icons do not."""
+    from . import cli
+    from .tmux import PaneInfo
+
+    results = []
+
+    results.append(TestResult(
+        "escape__format_and_style_neutralized",
+        cli._escape_tmux_format("fix #{session_name} #[bg=red]")
+        == "fix ##{session_name} ##[bg=red]",
+        "Expected # doubled so tmux renders it literally",
+    ))
+
+    originals = {
+        name: getattr(cli, name)
+        for name in ("get_hop_panes", "get_global_option", "is_in_tmux",
+                     "option_is_set", "_format_time_ago")
+    }
+    cli.get_global_option = lambda name, default="": default
+    cli.is_in_tmux = lambda: True
+    cli.option_is_set = lambda name: False
+    cli._format_time_ago = lambda timestamp: "4m"
+
+    def render(fn) -> str:
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            fn(argparse.Namespace())
+        return buf.getvalue()
+
+    try:
+        # A branch name and a model-written task, both carrying tmux syntax.
+        pane = PaneInfo("%1", "waiting", 1700000000, "/wt/#{host}", "main", 1,
+                        task="drop #{session_name}", wait_reason="permission",
+                        repo="re#po", branch="fix/#[bg=red]")
+        cli.get_hop_panes = lambda validate=True: [pane]
+
+        out = render(cli.cmd_status_next)
+        results.append(TestResult(
+            "escape__status_next_project",
+            "re##po" in out and "re#po " not in out,
+            f"Expected escaped project in badge, got {out!r}",
+        ))
+        # The range marker and style codes the plugin itself emits must survive.
+        results.append(TestResult(
+            "escape__status_next_markers_intact",
+            out.startswith("#[range=pane|%1 ") and out.endswith("#[norange default]"),
+            f"Expected plugin-authored markers unescaped, got {out!r}",
+        ))
+        # The state icon comes from @hop-status-format, so it stays untouched.
+        results.append(TestResult(
+            "escape__icon_not_escaped",
+            cli._get_state_icon("waiting") in out,
+            f"Expected the icon verbatim, got {out!r}",
+        ))
+
+        out = render(cli.cmd_status_inbox)
+        results.append(TestResult(
+            "escape__status_inbox_project",
+            "####{host}" not in out and "##{host}" in out,
+            f"Expected the cwd basename escaped once, got {out!r}",
+        ))
+
+        # The cycle line carries repo and task, not the branch.
+        msg = cli._cycle_feedback_message(pane, 1, 2)
+        results.append(TestResult(
+            "escape__cycle_feedback",
+            "##{session_name}" in msg and "re##po" in msg,
+            f"Expected escaped detail fields, got {msg!r}",
+        ))
+    finally:
+        for name, fn in originals.items():
+            setattr(cli, name, fn)
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -2716,6 +2793,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_conductor_session_excluded())
     all_results.extend(test_spawn_window_session_target_disambiguation())
     all_results.extend(test_cycle_feedback())
+    all_results.extend(test_tmux_format_escaping())
     all_results.extend(validate_hooks_json())
 
     passed = sum(1 for r in all_results if r.passed)

@@ -621,10 +621,7 @@ def _cycle_feedback_message(pane: PaneInfo, index: int, total: int) -> str:
         _format_task_display(pane.task, CYCLE_FEEDBACK_TASK_MAX),
     ]
     detail = CYCLE_FEEDBACK_SEPARATOR.join(field for field in fields if field)
-    # tmux expands #(), #{} and #[] inside a display-message body, so
-    # pane-derived text must not reach it as a live format string.
-    detail = detail.replace("#", "##")
-    return f"[{index}/{total} {pane.state}] {detail}".rstrip()
+    return f"[{index}/{total} {pane.state}] {_escape_tmux_format(detail)}".rstrip()
 
 
 @requires_tmux(silent=False)
@@ -933,6 +930,20 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _escape_tmux_format(text: str) -> str:
+    """Neutralize tmux format syntax in text the plugin did not author.
+
+    tmux re-expands `#{...}` and `#[...]` inside the output of a `#(...)`
+    status command and inside a display-message body, so a branch name, repo
+    directory, or model-written task summary would otherwise be interpreted
+    rather than shown. `##` is tmux's escape for a literal `#`. Nested
+    `#(...)` is not executed, so this guards display integrity, not shell
+    execution. State icons are deliberately exempt: those come from
+    `@hop-status-format`, where style codes are a legitimate thing to write.
+    """
+    return text.replace("#", "##")
+
+
 def _pane_badge(pane_id: str, label: str, style_option: str, default_style: str) -> str:
     """Render a label as a styled, click-to-hop tmux status badge.
 
@@ -977,7 +988,7 @@ def cmd_status_inbox(args: argparse.Namespace) -> int:
     line = " ".join(
         _pane_badge(
             pane.id,
-            f"{_get_state_icon(pane.state)} {pane.project}".strip(),
+            f"{_get_state_icon(pane.state)} {_escape_tmux_format(pane.project)}".strip(),
             INBOX_STYLE_OPTIONS[pane.state],
             STATE_TMUX_BADGE[pane.state],
         )
@@ -1017,11 +1028,11 @@ def cmd_status_next(args: argparse.Namespace) -> int:
         "icon": _get_state_icon(pane.state),
         # Main-repo name over the cwd basename so a worktree pane doesn't
         # repeat its branch in both {project} and {branch}.
-        "project": pane.repo or pane.project,
-        "branch": pane.branch,
-        "reason": pane.wait_reason,
+        "project": _escape_tmux_format(pane.repo or pane.project),
+        "branch": _escape_tmux_format(pane.branch),
+        "reason": _escape_tmux_format(pane.wait_reason),
         "age": _format_time_ago(pane.timestamp),
-        "task": _format_task_display(pane.task, STATUS_NEXT_TASK_MAX),
+        "task": _escape_tmux_format(_format_task_display(pane.task, STATUS_NEXT_TASK_MAX)),
     }
     format_str = get_global_option(STATUS_NEXT_FORMAT_OPTION, DEFAULT_STATUS_NEXT_FORMAT)
     expanded = STATUS_NEXT_TOKEN_RE.sub(lambda m: values.get(m.group(1), ""), format_str)
