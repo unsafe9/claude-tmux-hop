@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from . import __version__
 from .priority import VALID_CYCLE_MODES, VALID_STATES
+from .tmux import PREVIEW_DEFAULT_LINES
 
 if TYPE_CHECKING:
     from typing import Callable
@@ -31,6 +32,7 @@ def create_parser(
     cmd_status_next: CommandHandler,
     cmd_inbox: CommandHandler,
     cmd_inbox_clear: CommandHandler,
+    cmd_preview: CommandHandler,
     cmd_install: CommandHandler,
     cmd_update: CommandHandler,
     cmd_spawn_task: CommandHandler,
@@ -232,6 +234,26 @@ def create_parser(
         help="Dismiss current notifications (panes resurface on next state change)",
     )
     inbox_clear_parser.set_defaults(func=cmd_inbox_clear)
+
+    # preview command (internal)
+    preview_parser = subparsers.add_parser(
+        "preview",
+        help="Render a pane's live content for the inbox preview window (internal)",
+    )
+    preview_parser.add_argument(
+        "--pane",
+        "-p",
+        required=True,
+        help="Pane ID to preview",
+    )
+    preview_parser.add_argument(
+        "--lines",
+        "-n",
+        type=int,
+        default=PREVIEW_DEFAULT_LINES,
+        help=f"Trailing content lines to show (default: {PREVIEW_DEFAULT_LINES})",
+    )
+    preview_parser.set_defaults(func=cmd_preview)
 
     # --- Management commands ---
 

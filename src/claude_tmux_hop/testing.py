@@ -846,6 +846,7 @@ def _build_full_parser():
         cmd_status_next=noop,
         cmd_inbox=noop,
         cmd_inbox_clear=noop,
+        cmd_preview=noop,
         cmd_install=noop,
         cmd_update=noop,
         cmd_spawn_task=noop,
@@ -2356,6 +2357,157 @@ def test_pending_panes() -> list[TestResult]:
     return results
 
 
+def test_preview_trimming() -> list[TestResult]:
+    """`_trim_preview_lines` drops capture-pane padding and tails the rest."""
+    from . import cli
+
+    results = []
+
+    padded = "first\n  indented\nlast line\n\n   \n\x1b[0m\n"
+    trimmed = cli._trim_preview_lines(padded, 40)
+    results.append(TestResult(
+        "preview_trim__drops_trailing_padding",
+        trimmed == ["first", "  indented", "last line"],
+        f"Expected padding dropped, got {trimmed!r}",
+    ))
+
+    tailed = cli._trim_preview_lines("\n".join(str(i) for i in range(100)), 3)
+    results.append(TestResult(
+        "preview_trim__tails_last_n_lines",
+        tailed == ["97", "98", "99"],
+        f"Expected the last 3 lines, got {tailed!r}",
+    ))
+
+    colored = cli._trim_preview_lines("\x1b[31mred\x1b[0m\n\n", 40)
+    results.append(TestResult(
+        "preview_trim__keeps_color_codes",
+        colored == ["\x1b[31mred\x1b[0m"],
+        f"Expected the pane's own colors preserved, got {colored!r}",
+    ))
+
+    results.append(TestResult(
+        "preview_trim__blank_capture_is_empty",
+        cli._trim_preview_lines("\n  \n\x1b[0m\n", 40) == [],
+        f"Expected [], got {cli._trim_preview_lines('\\n  \\n', 40)!r}",
+    ))
+
+    return results
+
+
+def test_preview_command() -> list[TestResult]:
+    """`preview` prints a header + captured content, and stays silent on dead panes."""
+    import time
+
+    from . import cli
+    from .tmux import PaneInfo
+
+    results = []
+    now = int(time.time())
+
+    pane = PaneInfo(
+        id="%7", state="waiting", timestamp=now - 300, cwd="/repo/proj",
+        session="main", window=1, task="fix the parser", wait_reason="permission",
+        repo="myrepo", branch="feature/x",
+    )
+    captures = {"%7": "question?\n> yes\n\n\n"}
+
+    originals = {
+        name: getattr(cli, name)
+        for name in ("capture_pane_ansi", "get_hop_panes", "get_global_option", "is_in_tmux")
+    }
+    try:
+        cli.capture_pane_ansi = lambda pane_id: captures.get(pane_id, "")
+        cli.get_hop_panes = lambda validate=True: [pane]
+        # Pin the icon source to DEFAULT_STATUS_FORMAT.
+        cli.get_global_option = lambda name, default="": default
+        cli.is_in_tmux = lambda: True
+
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            rc = cli.cmd_preview(argparse.Namespace(pane="%7", lines=40))
+        out = buf.getvalue()
+        lines = out.split("\n")
+
+        results.append(TestResult(
+            "preview_cmd__exit_zero", rc == 0, f"Expected 0, got {rc}",
+        ))
+        expected_header = f"{cli.STATE_ICONS['waiting']} myrepo  feature/x  [5m]  (permission)  fix the parser"
+        results.append(TestResult(
+            "preview_cmd__header_from_pane_options",
+            lines[0] == f"{cli.STATE_ANSI['waiting']}{expected_header}{cli.ANSI_RESET}",
+            f"Expected header {expected_header!r}, got {lines[0]!r}",
+        ))
+        results.append(TestResult(
+            "preview_cmd__blank_line_then_content",
+            lines[1] == "" and lines[2:4] == ["question?", "> yes"],
+            f"Expected blank line then content, got {lines[:4]!r}",
+        ))
+
+        # A pane whose capture comes back empty is gone (or has nothing to
+        # show): no output at all, so fzf renders an empty preview window.
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            rc = cli.cmd_preview(argparse.Namespace(pane="%gone", lines=40))
+        results.append(TestResult(
+            "preview_cmd__dead_pane_silent_exit_zero",
+            rc == 0 and buf.getvalue() == "",
+            f"Expected rc=0 and empty stdout, got rc={rc}, out={buf.getvalue()!r}",
+        ))
+
+        # Untracked panes have no stored identity — content only, no header.
+        cli.get_hop_panes = lambda validate=True: []
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            cli.cmd_preview(argparse.Namespace(pane="%7", lines=40))
+        results.append(TestResult(
+            "preview_cmd__untracked_pane_has_no_header",
+            buf.getvalue() == "question?\n> yes\n",
+            f"Expected bare content, got {buf.getvalue()!r}",
+        ))
+    finally:
+        for name, value in originals.items():
+            setattr(cli, name, value)
+
+    return results
+
+
+def test_preview_arg_parsing() -> list[TestResult]:
+    """`preview` requires --pane and defaults --lines to PREVIEW_DEFAULT_LINES."""
+    from .tmux import PREVIEW_DEFAULT_LINES
+
+    results = []
+
+    parser = _build_full_parser()
+
+    ns = parser.parse_args(["preview", "--pane", "%3"])
+    results.append(TestResult(
+        "preview_arg_parsing__lines_default",
+        ns.pane == "%3" and ns.lines == PREVIEW_DEFAULT_LINES,
+        f"Expected pane=%3 and default lines, got {ns!r}",
+    ))
+
+    ns = parser.parse_args(["preview", "--pane", "%3", "--lines", "10"])
+    results.append(TestResult(
+        "preview_arg_parsing__lines_override",
+        ns.lines == 10,
+        f"Expected lines=10, got {ns.lines!r}",
+    ))
+
+    pane_required = False
+    try:
+        with redirect_stderr(io.StringIO()):
+            parser.parse_args(["preview"])
+    except SystemExit:
+        pane_required = True
+    results.append(TestResult(
+        "preview_arg_parsing__pane_required",
+        pane_required,
+        "Expected SystemExit without --pane",
+    ))
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -2378,6 +2530,9 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_inbox_identity_backfill())
     all_results.extend(test_inbox_includes_active())
     all_results.extend(test_pending_panes())
+    all_results.extend(test_preview_trimming())
+    all_results.extend(test_preview_command())
+    all_results.extend(test_preview_arg_parsing())
     all_results.extend(test_cmd_list_json())
     all_results.extend(test_register_arg_parsing())
     all_results.extend(test_state_icon_from_status_format())

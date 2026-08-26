@@ -25,6 +25,7 @@ from .priority import (
 from .tmux import (
     PaneInfo,
     _is_conductor_enabled,
+    capture_pane_ansi,
     clear_pane_state,
     get_claude_panes_by_process,
     get_current_pane,
@@ -158,6 +159,10 @@ STATUS_NEXT_TOKEN_RE = re.compile(r"\{(\w+)\}")
 # The badge shares a status line with whatever else the user put there, so the
 # task token stays well short of the inbox's own cap.
 STATUS_NEXT_TASK_MAX = 40
+
+# The inbox preview keeps the captured pane's own escape sequences, so they are
+# stripped only to decide whether a line is blank.
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 # How many bytes of the transcript tail to scan for the latest ai-title.
 # Claude Code regenerates ai-title each user turn; the most recent one is
@@ -1102,6 +1107,62 @@ def cmd_inbox_clear(args: argparse.Namespace) -> int:
     return 0
 
 
+def _trim_preview_lines(content: str, lines: int) -> list[str]:
+    """Last `lines` lines of a pane capture, trailing padding dropped.
+
+    capture-pane pads its output to the pane's full height, so the tail of a
+    raw capture is mostly blanks while everything worth reading — the question,
+    the permission prompt, the last output — sits at the bottom of the real
+    content. Color codes never make a line non-blank.
+    """
+    body = content.split("\n")
+    while body and not ANSI_ESCAPE_RE.sub("", body[-1]).strip():
+        body.pop()
+    return body[-lines:] if lines > 0 else body
+
+
+def _preview_header(pane: PaneInfo) -> str:
+    """One-line pane summary above the preview content.
+
+    Same field order as the inbox row it belongs to (icon, project, branch,
+    time, reason, task), minus the columns the row itself already carries.
+    """
+    icon = _get_state_icon(pane.state) or pane.state
+    parts = [f"{icon} {pane.repo or pane.project}".strip()]
+    if pane.branch:
+        parts.append(pane.branch)
+    parts.append(f"[{_format_time_ago(pane.timestamp)}]")
+    if pane.wait_reason:
+        parts.append(f"({pane.wait_reason})")
+    task = _format_task_display(pane.task, INBOX_TASK_MAX)
+    if task:
+        parts.append(task)
+    return "  ".join(parts)
+
+
+@requires_tmux(silent=True)
+def cmd_preview(args: argparse.Namespace) -> int:
+    """Render a pane's live terminal content for the inbox popup preview.
+
+    fzf re-runs this on every cursor move, so it stays log-free like the
+    status path. A vanished pane produces no output and exit 0 — a preview
+    command that errors renders its stderr in the popup.
+    """
+    body = _trim_preview_lines(capture_pane_ansi(args.pane), args.lines)
+    if not body:
+        return 0
+
+    # Panes with no hop state (or that died between list and capture) still
+    # preview fine; only the header needs their stored identity.
+    pane = next((p for p in get_hop_panes(validate=False) if p.id == args.pane), None)
+    if pane is not None:
+        print(f"{STATE_ANSI.get(pane.state, '')}{_preview_header(pane)}{ANSI_RESET}")
+        print()
+
+    print("\n".join(body))
+    return 0
+
+
 def cmd_install(args: argparse.Namespace) -> int:
     """Interactive installation wizard."""
     from .install import (
@@ -1470,6 +1531,7 @@ def main() -> int:
         cmd_status_next=cmd_status_next,
         cmd_inbox=cmd_inbox,
         cmd_inbox_clear=cmd_inbox_clear,
+        cmd_preview=cmd_preview,
         cmd_install=cmd_install,
         cmd_update=cmd_update,
         cmd_spawn_task=cmd_spawn_task,

@@ -86,10 +86,27 @@ inbox_popup() {
     tmpfile=$(mktemp "${TMPDIR:-/tmp}/hop-inbox.XXXXXX") || return 1
     printf '%s\n' "$data" > "$tmpfile"
 
-    local fzf_cmd
-    fzf_cmd="trap 'rm -f \"$tmpfile\"' EXIT; fzf --ansi --reverse --no-info --with-nth=1 --delimiter='\t' --header='enter: jump / ctrl-x: clear all' --pointer='>' --prompt='' --bind='enter:execute-silent($cmd switch --pane {2})+abort' --bind='ctrl-x:execute-silent($cmd inbox-clear)+abort' < \"$tmpfile\" || true"
+    # Preview shows the highlighted pane's live content, so the whole queue can
+    # be triaged without hopping. Field 2 is the pane id (fzf shell-quotes the
+    # substitution). Turning it off restores the compact popup.
+    local preview_opts="" header="enter: jump / ctrl-x: clear all"
+    local width=80% height=60%
+    case "$(get_tmux_option @hop-inbox-preview "on")" in
+        on|1|true|yes)
+            local preview_lines
+            # The line count defaults in the CLI, so pass it only when set.
+            preview_lines=$(get_tmux_option @hop-inbox-preview-lines "")
+            preview_opts="--preview='$cmd preview --pane {2}${preview_lines:+ --lines $preview_lines}'"
+            preview_opts="$preview_opts --preview-window='right,55%,border-left' --bind='ctrl-/:toggle-preview'"
+            header="$header / ctrl-/: toggle preview"
+            width=90% height=80%
+            ;;
+    esac
 
-    tmux display-popup -E -w 80% -h 60% -T " Notifications " bash -c "$fzf_cmd"
+    local fzf_cmd
+    fzf_cmd="trap 'rm -f \"$tmpfile\"' EXIT; fzf --ansi --reverse --no-info --with-nth=1 --delimiter='\t' --header='$header' --pointer='>' --prompt='' $preview_opts --bind='enter:execute-silent($cmd switch --pane {2})+abort' --bind='ctrl-x:execute-silent($cmd inbox-clear)+abort' < \"$tmpfile\" || true"
+
+    tmux display-popup -E -w "$width" -h "$height" -T " Notifications " bash -c "$fzf_cmd"
 }
 
 # Show notification inbox using display-menu (fallback)
