@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-08-26
+
+### Added
+
+- The notification inbox (`prefix + i`) now shows the highlighted pane's live
+  terminal content beside the list, so you can read what a session is actually
+  asking without hopping to it and triage the whole queue in one pass. `ctrl-/`
+  toggles the preview; `@hop-inbox-preview` turns it off entirely and
+  `@hop-inbox-preview-lines` sets how much of the pane to show.
+- A new status source, `@hop-status-next`, renders just the top-priority pending
+  pane as a single clickable badge — the one thing to do right now, in one slot
+  of your status bar. `@hop-status-next-format` shapes the label from `{icon}`,
+  `{project}`, `{branch}`, `{reason}`, `{age}` and `{task}` tokens, and
+  `@hop-status-next-style` recolors it. It derives from the same ordering and
+  dismiss filter as every other view, so it can never disagree with them.
+- Cycling with `prefix + Space` now reports your position in the queue being
+  swept, e.g. `[2/3 waiting] palm-server · permission · 4m`, so it is obvious
+  when you have seen everything. Set `@hop-cycle-feedback off` to hop silently.
+
+### Fixed
+
+- Branch names, repository directories and task summaries are escaped before
+  they reach the status bar or a tmux message. tmux re-expands `#{...}` and
+  `#[...]` in those places, so text containing them previously rendered wrong or
+  bled styling into the rest of the line.
+
 ## [0.8.4] - 2026-06-12
 
 ### Fixed
