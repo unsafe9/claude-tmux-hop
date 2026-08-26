@@ -28,6 +28,7 @@ def create_parser(
     cmd_prune: CommandHandler,
     cmd_status: CommandHandler,
     cmd_status_inbox: CommandHandler,
+    cmd_status_next: CommandHandler,
     cmd_inbox: CommandHandler,
     cmd_inbox_clear: CommandHandler,
     cmd_install: CommandHandler,
@@ -205,6 +206,13 @@ def create_parser(
         help="Output the pending-pane list for a second tmux status line",
     )
     status_inbox_parser.set_defaults(func=cmd_status_inbox)
+
+    # status-next command (single-slot badge: the top-priority pending pane)
+    status_next_parser = subparsers.add_parser(
+        "status-next",
+        help="Output the top-priority pending pane as a single tmux status badge",
+    )
+    status_next_parser.set_defaults(func=cmd_status_next)
 
     # inbox command (internal)
     inbox_parser = subparsers.add_parser(
