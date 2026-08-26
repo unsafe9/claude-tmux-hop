@@ -138,6 +138,22 @@ set -g status-right '#{E:@hop-status} | %H:%M'
 # set -g @hop-status-inbox-waiting-style ''   # disable color for waiting
 # set -g @hop-status-inbox-idle-style    ''   # disable color for idle
 
+# Up next (optional) - the single pane to deal with right now, as one badge
+# (e.g. "󰂜 palm-server permission 4m"). Same ordering and dismiss filter as the
+# inbox, so it always agrees with it; renders nothing when nothing is pending.
+# Clicking it jumps to that pane, just like an inbox badge.
+# set -g status-right '#{E:@hop-status-next} │ #{E:@hop-status} │ %H:%M'
+#
+# Label format (default: "{icon} {project} {reason} {age}")
+# Tokens: {icon} {project} {branch} {reason} {age} {task}. Tokens with nothing
+# to show collapse away, so panes without a branch or wait reason leave no gap.
+# set -g @hop-status-next-format '{icon} {project} {branch} {age} {task}'
+#
+# Badge color follows the pane's state by default (same palette as the inbox
+# badges). Set to empty to disable coloring.
+# set -g @hop-status-next-style 'fg=colour235 bg=colour110'
+# set -g @hop-status-next-style ''   # no color (still clickable)
+
 # Window auto-rename (default: off)
 # Renames the tmux window to "<state-icon> <directory name>" so the state icon
 # stays current while the name remains a stable label (worktree directories

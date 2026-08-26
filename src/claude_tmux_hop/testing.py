@@ -843,6 +843,7 @@ def _build_full_parser():
         cmd_prune=noop,
         cmd_status=noop,
         cmd_status_inbox=noop,
+        cmd_status_next=noop,
         cmd_inbox=noop,
         cmd_inbox_clear=noop,
         cmd_install=noop,
@@ -1945,6 +1946,139 @@ def test_status_inbox_line() -> list[TestResult]:
     return results
 
 
+def test_status_next_badge() -> list[TestResult]:
+    """`status-next` renders only the top-priority pending pane as one badge."""
+    from . import cli
+    from .tmux import PaneInfo
+
+    results = []
+    now = 1700000000
+
+    originals = {
+        name: getattr(cli, name)
+        for name in ("get_hop_panes", "get_global_option", "is_in_tmux",
+                     "option_is_set", "_format_time_ago")
+    }
+    # Pin icon source to DEFAULT_STATUS_FORMAT, cleared-at to 0, and the age
+    # string; no style override set, so the badge uses STATE_TMUX_BADGE.
+    cli.get_global_option = lambda name, default="": default
+    cli.is_in_tmux = lambda: True
+    cli.option_is_set = lambda name: False
+    cli._format_time_ago = lambda timestamp: "4m"
+
+    def render() -> tuple[int, str]:
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(io.StringIO()):
+            rc = cli.cmd_status_next(argparse.Namespace())
+        return rc, buf.getvalue()
+
+    try:
+        wi = cli._get_state_icon("waiting")
+        ii = cli._get_state_icon("idle")
+
+        panes = [
+            PaneInfo("%1", "idle", now, "/repo/myapp", "work", 1),
+            PaneInfo("%2", "waiting", now - 60, "/wt/login", "main", 2,
+                     task="fix the login redirect", wait_reason="permission",
+                     repo="palm-server", branch="feature/login"),
+            PaneInfo("%3", "active", now, "/repo/busy", "main", 3),
+        ]
+        cli.get_hop_panes = lambda validate=True: list(panes)
+
+        rc, out = render()
+        results.append(TestResult(
+            "status_next__exit_zero", rc == 0, f"Expected 0, got {rc}",
+        ))
+        expected = (
+            f"#[range=pane|%2 fg=colour235 bg=colour143]"
+            f" {wi} palm-server permission 4m #[norange default]"
+        )
+        results.append(TestResult(
+            "status_next__top_priority_pane_only",
+            out == expected,
+            f"Expected {expected!r}, got {out!r}",
+        ))
+
+        # Explicit empty style override disables color; the badge stays
+        # wrapped in range=pane. option_is_set distinguishes it from unset.
+        cli.option_is_set = lambda name: name == cli.STATUS_NEXT_STYLE_OPTION
+        cli.get_global_option = (
+            lambda name, default="": "" if name == cli.STATUS_NEXT_STYLE_OPTION else default
+        )
+        _, out = render()
+        expected_plain = f"#[range=pane|%2] {wi} palm-server permission 4m #[norange default]"
+        results.append(TestResult(
+            "status_next__style_override_disables_color",
+            out == expected_plain,
+            f"Expected {expected_plain!r}, got {out!r}",
+        ))
+        cli.option_is_set = lambda name: False
+
+        # Every token expands; a long task is capped.
+        long_task = "a" * (cli.STATUS_NEXT_TASK_MAX + 20)
+        panes[1].task = long_task
+        cli.get_global_option = lambda name, default="": (
+            "{icon} {project} {branch} {reason} {age} {task}"
+            if name == cli.STATUS_NEXT_FORMAT_OPTION
+            else default
+        )
+        _, out = render()
+        rendered_task = "a" * (cli.STATUS_NEXT_TASK_MAX - 1) + "…"
+        results.append(TestResult(
+            "status_next__all_tokens_expand_task_truncated",
+            out.endswith(
+                f" {wi} palm-server feature/login permission 4m {rendered_task}"
+                " #[norange default]"
+            ),
+            f"Unexpected token expansion: {out!r}",
+        ))
+        panes[1].task = "fix the login redirect"
+
+        # A pane with no branch/reason/task collapses those tokens instead of
+        # leaving double spaces behind.
+        cli.get_hop_panes = lambda validate=True: [
+            PaneInfo("%4", "idle", now, "/repo/plain", "s", 4),
+        ]
+        _, out = render()
+        expected_collapsed = (
+            f"#[range=pane|%4 fg=colour235 bg=colour108] {ii} plain 4m #[norange default]"
+        )
+        results.append(TestResult(
+            "status_next__empty_tokens_collapse",
+            out == expected_collapsed,
+            f"Expected {expected_collapsed!r}, got {out!r}",
+        ))
+        cli.get_global_option = lambda name, default="": default
+
+        # Dismissed panes are hidden, exactly as in the inbox and cycle.
+        cli.get_hop_panes = lambda validate=True: list(panes)
+        cli.get_global_option = (
+            lambda name, default="": str(now) if name == cli.INBOX_CLEARED_OPTION else default
+        )
+        _, out = render()
+        results.append(TestResult(
+            "status_next__dismiss_stamp_hides_pane",
+            out == "",
+            f"Expected empty output after dismiss, got {out!r}",
+        ))
+        cli.get_global_option = lambda name, default="": default
+
+        cli.get_hop_panes = lambda validate=True: [
+            PaneInfo("%9", "active", now, "/repo/x", "main", 1),
+        ]
+        _, out = render()
+        results.append(TestResult(
+            "status_next__empty_when_no_pending",
+            out == "",
+            f"Expected empty output, got {out!r}",
+        ))
+    finally:
+        for name, val in originals.items():
+            setattr(cli, name, val)
+
+    return results
+
+
 def _patch_cmd_inbox_env(cli, panes, running, cleared):
     """Patch the cli attributes `cmd_inbox` touches; returns the originals."""
     originals = {
@@ -2238,6 +2372,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_git_identity())
     all_results.extend(test_inbox_lines_alignment())
     all_results.extend(test_status_inbox_line())
+    all_results.extend(test_status_next_badge())
     all_results.extend(test_inbox_self_heal())
     all_results.extend(test_self_heal_ps_failure())
     all_results.extend(test_inbox_identity_backfill())

@@ -193,6 +193,9 @@ main() {
     # Optional second status line: pending-pane list (see README).
     # Users can use #{E:@hop-status-inbox} in status-format[1].
     tmux set-option -g @hop-status-inbox "#($cmd status-inbox)"
+    # Optional single-slot "up next" badge: the top-priority pending pane.
+    # Users can use #{E:@hop-status-next} in status-left/status-right.
+    tmux set-option -g @hop-status-next "#($cmd status-next)"
 
     # Version check: compare tmux plugin with Claude Code plugin
     local tmux_version claude_plugin_path claude_version

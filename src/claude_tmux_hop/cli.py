@@ -128,11 +128,11 @@ ANSI_RESET = "\033[0m"
 _ANSI_DIM = "\033[90m"
 _ANSI_YELLOW = "\033[33m"
 STATE_ANSI = {"waiting": _ANSI_YELLOW, "idle": "\033[32m", "active": "\033[36m"}
-# Per-state badge styles for the second status line (cmd_status_inbox):
-# background-colored pills, mirroring STATE_ANSI's meaning; only the pending
-# states are ever rendered there. Space-separated attrs follow tmux's own
-# window-status-format convention. These are defaults — each is overridable
-# via the matching INBOX_STYLE_OPTIONS option; an empty override drops the
+# Per-state badge styles for the status-line badges (cmd_status_inbox,
+# cmd_status_next): background-colored pills, mirroring STATE_ANSI's meaning;
+# only the pending states are ever rendered as badges. Space-separated attrs
+# follow tmux's own window-status-format convention. These are defaults — each
+# is overridable via the matching style option; an empty override drops the
 # color (plain badge, still listed and clickable).
 STATE_TMUX_BADGE = {
     "waiting": "fg=colour235 bg=colour143",  # muted khaki/gold
@@ -147,6 +147,17 @@ INBOX_STYLE_OPTIONS = {
 # Column order: icon, session:window, project, branch, time, reason, task.
 # The icon column ("") is colored per-state via STATE_ANSI instead.
 INBOX_COLUMN_STYLES = ("", "\033[35m", "", "\033[36m", _ANSI_DIM, _ANSI_YELLOW, "")
+
+# Single-slot "up next" badge (cmd_status_next): one style option covers both
+# pending states, since only one pane is ever rendered.
+STATUS_NEXT_STYLE_OPTION = "@hop-status-next-style"
+STATUS_NEXT_FORMAT_OPTION = "@hop-status-next-format"
+DEFAULT_STATUS_NEXT_FORMAT = "{icon} {project} {reason} {age}"
+# {token} placeholders in @hop-status-next-format
+STATUS_NEXT_TOKEN_RE = re.compile(r"\{(\w+)\}")
+# The badge shares a status line with whatever else the user put there, so the
+# task token stays well short of the inbox's own cap.
+STATUS_NEXT_TASK_MAX = 40
 
 # How many bytes of the transcript tail to scan for the latest ai-title.
 # Claude Code regenerates ai-title each user turn; the most recent one is
@@ -881,6 +892,26 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pane_badge(pane_id: str, label: str, style_option: str, default_style: str) -> str:
+    """Render a label as a styled, click-to-hop tmux status badge.
+
+    A mouse click on the badge hops to the pane for free: tmux's default
+    MouseDown1Status binding is `switch-client -t =`, and `switch-client` to a
+    pane target switches session, window, and pane — so no keybinding is
+    registered. The `#[range=...]` markers survive the `#(...)` substitution
+    the same way the `#[...]` style codes do.
+
+    An explicitly-set style option wins (incl. "" to disable color); only an
+    unset option falls back to default_style. `get_global_option` collapses
+    unset and set-to-empty, so the presence check has to come first.
+    """
+    style = (
+        get_global_option(style_option, "") if option_is_set(style_option) else default_style
+    )
+    marker = f"#[range=pane|{pane_id} {style}]" if style else f"#[range=pane|{pane_id}]"
+    return f"{marker} {label} #[norange default]"
+
+
 @requires_tmux(silent=True)
 def cmd_status_inbox(args: argparse.Namespace) -> int:
     """Output the pending-pane list for a second tmux status line.
@@ -891,15 +922,8 @@ def cmd_status_inbox(args: argparse.Namespace) -> int:
     label — for an optional second status line (`status-format[1]`).
     State drives a background-colored pill (STATE_TMUX_BADGE default, per-state
     overridable via INBOX_STYLE_OPTIONS), so the line reads like the window
-    list rather than flat text. An empty override drops the color to a plain,
-    still-clickable badge. All pending panes are listed; tmux truncates the
-    line at the status-bar edge.
-
-    Each badge is wrapped in `#[range=pane|<id>]` so a mouse click hops to
-    that pane: tmux's default MouseDown1Status binding is `switch-client -t =`,
-    and `switch-client` to a pane target switches session, window, and pane —
-    so clicking works with no extra keybinding (the segment markers survive
-    the `#(...)` substitution the same way the `#[...]` style codes do).
+    list rather than flat text. All pending panes are listed; tmux truncates
+    the line at the status-bar edge.
 
     Deliberately light for the polling path: a plain pane-option read plus
     the shared ordering/dismiss filter (_pending_panes), with no self-heal,
@@ -909,20 +933,65 @@ def cmd_status_inbox(args: argparse.Namespace) -> int:
 
     pending = _pending_panes(get_hop_panes(validate=False))
 
-    segments = []
-    for pane in pending:
-        icon = _get_state_icon(pane.state)
-        # An explicitly-set option wins (incl. "" to disable color); only an
-        # unset option falls back to the default badge style.
-        opt = INBOX_STYLE_OPTIONS[pane.state]
-        style = get_global_option(opt, "") if option_is_set(opt) else STATE_TMUX_BADGE[pane.state]
-        label = f"{icon} {pane.project}".strip()
-        marker = f"#[range=pane|{pane.id} {style}]" if style else f"#[range=pane|{pane.id}]"
-        segments.append(f"{marker} {label} #[norange default]")
-
-    line = " ".join(segments)
+    line = " ".join(
+        _pane_badge(
+            pane.id,
+            f"{_get_state_icon(pane.state)} {pane.project}".strip(),
+            INBOX_STYLE_OPTIONS[pane.state],
+            STATE_TMUX_BADGE[pane.state],
+        )
+        for pane in pending
+    )
     if line:
         print(line, end="")
+    return 0
+
+
+@requires_tmux(silent=True)
+def cmd_status_next(args: argparse.Namespace) -> int:
+    """Output the top-priority pending pane as a single tmux status badge.
+
+    The third status source: cmd_status counts everything, cmd_status_inbox
+    lists every pending pane, and this answers "what is the one thing to do
+    right now" in a single slot (e.g. `status-right`). The target is the head
+    of the same ordering — and the same inbox-dismiss filter — every other
+    view uses, so it can never disagree with them. Nothing pending prints
+    nothing.
+
+    `@hop-status-next-format` shapes the label; empty tokens collapse away, so
+    a pane with no wait reason or no branch leaves no gap.
+
+    Deliberately light for the polling path, like cmd_status_inbox: a plain
+    pane-option read plus the shared ordering/dismiss filter, with no
+    self-heal, process scan, or git backfill.
+    """
+    # Don't log to avoid overhead in polling scenario
+
+    pending = _pending_panes(get_hop_panes(validate=False))
+    if not pending:
+        return 0
+
+    pane = pending[0]
+    values = {
+        "icon": _get_state_icon(pane.state),
+        # Main-repo name over the cwd basename so a worktree pane doesn't
+        # repeat its branch in both {project} and {branch}.
+        "project": pane.repo or pane.project,
+        "branch": pane.branch,
+        "reason": pane.wait_reason,
+        "age": _format_time_ago(pane.timestamp),
+        "task": _format_task_display(pane.task, STATUS_NEXT_TASK_MAX),
+    }
+    format_str = get_global_option(STATUS_NEXT_FORMAT_OPTION, DEFAULT_STATUS_NEXT_FORMAT)
+    expanded = STATUS_NEXT_TOKEN_RE.sub(lambda m: values.get(m.group(1), ""), format_str)
+    label = " ".join(expanded.split())
+
+    print(
+        _pane_badge(
+            pane.id, label, STATUS_NEXT_STYLE_OPTION, STATE_TMUX_BADGE[pane.state]
+        ),
+        end="",
+    )
     return 0
 
 
@@ -1398,6 +1467,7 @@ def main() -> int:
         cmd_prune=cmd_prune,
         cmd_status=cmd_status,
         cmd_status_inbox=cmd_status_inbox,
+        cmd_status_next=cmd_status_next,
         cmd_inbox=cmd_inbox,
         cmd_inbox_clear=cmd_inbox_clear,
         cmd_install=cmd_install,
