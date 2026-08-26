@@ -1991,7 +1991,7 @@ def test_status_next_badge() -> list[TestResult]:
             "status_next__exit_zero", rc == 0, f"Expected 0, got {rc}",
         ))
         expected = (
-            f"#[range=pane|%2 fg=colour235 bg=colour143]"
+            f"#[range=pane|%2 fg=colour143]"
             f" {wi} palm-server permission 4m #[norange default]"
         )
         results.append(TestResult(
@@ -2042,7 +2042,7 @@ def test_status_next_badge() -> list[TestResult]:
         ]
         _, out = render()
         expected_collapsed = (
-            f"#[range=pane|%4 fg=colour235 bg=colour108] {ii} plain 4m #[norange default]"
+            f"#[range=pane|%4 fg=colour108] {ii} plain 4m #[norange default]"
         )
         results.append(TestResult(
             "status_next__empty_tokens_collapse",
@@ -2657,19 +2657,19 @@ def test_cycle_feedback() -> list[TestResult]:
         f"Expected an escaped task tail, got {msg!r}",
     ))
 
-    # The option itself defaults to on and honors an explicit off.
+    # The option itself is opt-in and honors an explicit on.
     original_get_global_option = tmux.get_global_option
     try:
         tmux.get_global_option = lambda name, default="": default
-        default_on = tmux.is_cycle_feedback_enabled()
-        tmux.get_global_option = lambda name, default="": "off"
-        explicit_off = tmux.is_cycle_feedback_enabled()
+        default_off = tmux.is_cycle_feedback_enabled()
+        tmux.get_global_option = lambda name, default="": "on"
+        explicit_on = tmux.is_cycle_feedback_enabled()
     finally:
         tmux.get_global_option = original_get_global_option
     results.append(TestResult(
-        "cycle_feedback__option_defaults_on",
-        default_on and not explicit_off,
-        f"Expected default on / explicit off, got {default_on} / {explicit_off}",
+        "cycle_feedback__option_defaults_off",
+        not default_off and explicit_on,
+        f"Expected default off / explicit on, got {default_off} / {explicit_on}",
     ))
 
     return results

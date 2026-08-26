@@ -287,7 +287,7 @@ def is_window_rename_enabled() -> bool:
 
 def is_cycle_feedback_enabled() -> bool:
     """Whether cycle position feedback is enabled via `@hop-cycle-feedback`."""
-    return get_global_option("@hop-cycle-feedback", "on").strip().lower() in TRUTHY_VALUES
+    return get_global_option("@hop-cycle-feedback", "off").strip().lower() in TRUTHY_VALUES
 
 
 def rename_window(name: str, pane_id: str | None = None) -> None:

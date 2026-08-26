@@ -91,7 +91,7 @@ inbox_popup() {
     # substitution). Turning it off restores the compact popup.
     local preview_opts="" header="enter: jump / ctrl-x: clear all"
     local width=80% height=60%
-    case "$(get_tmux_option @hop-inbox-preview "on")" in
+    case "$(get_tmux_option @hop-inbox-preview "off")" in
         on|1|true|yes)
             local preview_lines
             # The line count defaults in the CLI, so pass it only when set.

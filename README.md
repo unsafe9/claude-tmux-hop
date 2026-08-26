@@ -81,10 +81,10 @@ set -g @hop-back-key 'C-Space'
 # ctrl-x dismisses current notifications (active panes stay).
 set -g @hop-inbox-key 'i'
 
-# Inbox preview (default: on) - show the highlighted pane's live terminal
+# Inbox preview (default: off) - show the highlighted pane's live terminal
 # content beside the list, so you can read what a pane is asking without
-# hopping to it. ctrl-/ toggles it; off restores the compact popup.
-# set -g @hop-inbox-preview 'off'
+# hopping to it. ctrl-/ toggles it inside the popup, which also widens.
+# set -g @hop-inbox-preview 'on'
 # set -g @hop-inbox-preview-lines '40'  # Trailing lines of pane content shown
 
 # Cycle mode (default: priority)
@@ -92,11 +92,11 @@ set -g @hop-inbox-key 'i'
 # - flat: cycle through all panes in priority order
 set -g @hop-cycle-mode 'priority'
 
-# Cycle feedback (default: on)
+# Cycle feedback (default: off)
 # After each hop, flash your position in the queue plus the pane's project,
 # wait reason, time in state, and task — e.g. "[2/3 waiting] palm-server ·
 # permission · 4m · Refactor auth module".
-# set -g @hop-cycle-feedback 'off'   # Hop silently
+# set -g @hop-cycle-feedback 'on'
 
 # Auto-hop: automatically switch to panes when they enter specific states
 # Disabled by default. Set to comma-separated states to enable.
@@ -161,9 +161,11 @@ set -g status-right '#{E:@hop-status} | %H:%M'
 # to show collapse away, so panes without a branch or wait reason leave no gap.
 # set -g @hop-status-next-format '{icon} {project} {branch} {age} {task}'
 #
-# Badge color follows the pane's state by default (same palette as the inbox
-# badges). Set to empty to disable coloring.
-# set -g @hop-status-next-style 'fg=colour235 bg=colour110'
+# The badge sits inline among unrelated status segments, so by default it
+# takes the pane's state color as foreground and leaves the bar's background
+# alone (unlike the second status line, where pills separate one pane from the
+# next). Override with any tmux style, or empty to drop color entirely.
+# set -g @hop-status-next-style 'fg=colour235 bg=colour110'  # pill instead
 # set -g @hop-status-next-style ''   # no color (still clickable)
 
 # Window auto-rename (default: off)
@@ -223,8 +225,8 @@ of the queue is left without opening the inbox:
 ```
 
 The counter is scoped to the panes actually being cycled — the current
-priority group in priority mode, the whole pending list in flat mode. Turn it
-off with `set -g @hop-cycle-feedback 'off'`.
+priority group in priority mode, the whole pending list in flat mode. Enable
+it with `set -g @hop-cycle-feedback 'on'`.
 
 ### State Storage
 
@@ -257,9 +259,9 @@ the output it just finished — in the pane's own colors, so the whole queue can
 be triaged without hopping. `ctrl-/` toggles it. A one-line summary heads the
 preview (state icon, project, branch, age, wait reason, task), followed by the
 last `@hop-inbox-preview-lines` lines (default 40) of actual content — the
-blank padding tmux reports below a pane's last output is skipped. Set
-`@hop-inbox-preview 'off'` for the compact list-only popup. The display-menu
-fallback (no fzf, or tmux < 3.2) has no preview.
+blank padding tmux reports below a pane's last output is skipped. The preview
+is opt-in via `@hop-inbox-preview 'on'`; without it the popup stays compact and
+list-only. The display-menu fallback (no fzf, or tmux < 3.2) has no preview.
 
 The listing is derived live from pane state, so it can't go stale: a killed
 pane disappears with its options, and a force-killed Claude process gets its

@@ -156,7 +156,14 @@ INBOX_STYLE_OPTIONS = {
 INBOX_COLUMN_STYLES = ("", "\033[35m", "", "\033[36m", _ANSI_DIM, _ANSI_YELLOW, "")
 
 # Single-slot "up next" badge (cmd_status_next): one style option covers both
-# pending states, since only one pane is ever rendered.
+# pending states, since only one pane is ever rendered. Unlike the second
+# status line — a list, where background pills separate one pane from the next —
+# this badge sits inline among unrelated status segments, so it carries the
+# state color as foreground and leaves the bar's own background alone.
+STATUS_NEXT_BADGE = {
+    "waiting": "fg=colour143",  # muted khaki/gold
+    "idle": "fg=colour108",  # muted sage green
+}
 STATUS_NEXT_STYLE_OPTION = "@hop-status-next-style"
 STATUS_NEXT_FORMAT_OPTION = "@hop-status-next-format"
 DEFAULT_STATUS_NEXT_FORMAT = "{icon} {project} {reason} {age}"
@@ -1040,7 +1047,7 @@ def cmd_status_next(args: argparse.Namespace) -> int:
 
     print(
         _pane_badge(
-            pane.id, label, STATUS_NEXT_STYLE_OPTION, STATE_TMUX_BADGE[pane.state]
+            pane.id, label, STATUS_NEXT_STYLE_OPTION, STATUS_NEXT_BADGE[pane.state]
         ),
         end="",
     )
