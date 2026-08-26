@@ -81,6 +81,12 @@ set -g @hop-back-key 'C-Space'
 # ctrl-x dismisses current notifications (active panes stay).
 set -g @hop-inbox-key 'i'
 
+# Inbox preview (default: on) - show the highlighted pane's live terminal
+# content beside the list, so you can read what a pane is asking without
+# hopping to it. ctrl-/ toggles it; off restores the compact popup.
+# set -g @hop-inbox-preview 'off'
+# set -g @hop-inbox-preview-lines '40'  # Trailing lines of pane content shown
+
 # Cycle mode (default: priority)
 # - priority: cycle within highest-priority group only
 # - flat: cycle through all panes in priority order
@@ -211,6 +217,16 @@ columns: state icon, session:window, project, branch, time ago, wait reason,
 task summary. `enter` jumps to the pane, `ctrl-x` dismisses the waiting/idle
 entries (they resurface on their next state change; active panes are an
 overview, not notifications, so they stay; status bar counts are unaffected).
+
+A preview window on the right shows the highlighted pane's live terminal
+content — the question it is asking, the permission prompt it is blocked on,
+the output it just finished — in the pane's own colors, so the whole queue can
+be triaged without hopping. `ctrl-/` toggles it. A one-line summary heads the
+preview (state icon, project, branch, age, wait reason, task), followed by the
+last `@hop-inbox-preview-lines` lines (default 40) of actual content — the
+blank padding tmux reports below a pane's last output is skipped. Set
+`@hop-inbox-preview 'off'` for the compact list-only popup. The display-menu
+fallback (no fzf, or tmux < 3.2) has no preview.
 
 The listing is derived live from pane state, so it can't go stale: a killed
 pane disappears with its options, and a force-killed Claude process gets its

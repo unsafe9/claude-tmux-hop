@@ -30,6 +30,8 @@ TRUTHY_VALUES = {"on", "1", "true", "yes"}
 
 WINDOW_NAME_MAX = 20  # Max chars for auto-renamed window names
 
+PREVIEW_DEFAULT_LINES = 40  # Trailing pane lines rendered in the inbox preview
+
 
 
 @dataclass
@@ -835,6 +837,21 @@ def capture_pane_content(pane_id: str, last_lines: int = 15) -> str:
         "capture-pane", "-t", pane_id, "-p", "-S", f"-{last_lines}",
         check=False,
     )
+
+
+def capture_pane_ansi(pane_id: str) -> str:
+    """Capture a pane's whole visible content, keeping its own colors.
+
+    `-e` emits the pane's ANSI sequences so a preview looks like the real
+    terminal. Returns "" when the pane is gone.
+
+    Args:
+        pane_id: The pane ID to capture
+
+    Returns:
+        The captured content, or empty string on failure
+    """
+    return run_tmux("capture-pane", "-p", "-e", "-t", pane_id, check=False)
 
 
 def _is_separator_line(stripped: str) -> bool:
