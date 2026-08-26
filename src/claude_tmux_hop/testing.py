@@ -2508,6 +2508,173 @@ def test_preview_arg_parsing() -> list[TestResult]:
     return results
 
 
+def _patch_cmd_cycle_env(cli, panes, dead=(), feedback=True):
+    """Patch the cli attributes `cmd_cycle` touches.
+
+    Returns (originals, messages, switched): `messages` collects every
+    display-message body, `switched` the panes tmux accepted. Panes listed in
+    `dead` make `switch_to_pane` fail, standing in for a pane that vanished
+    between the listing and the switch.
+    """
+    originals = {
+        name: getattr(cli, name)
+        for name in ("get_hop_panes", "validate_waiting_panes", "get_current_pane",
+                     "get_global_option", "switch_to_pane", "run_tmux",
+                     "is_cycle_feedback_enabled", "is_in_tmux")
+    }
+    messages: list[str] = []
+    switched: list[str] = []
+
+    def fake_switch(pane_id, target_session=None, target_window=None):
+        if pane_id in dead:
+            return False
+        switched.append(pane_id)
+        return True
+
+    def fake_run_tmux(*args, check=True):
+        if args and args[0] == "display-message":
+            messages.append(args[1])
+        return ""
+
+    cli.get_hop_panes = lambda validate=True: list(panes)
+    cli.validate_waiting_panes = lambda panes: None
+    cli.get_current_pane = lambda: None
+    cli.get_global_option = lambda name, default="": default
+    cli.switch_to_pane = fake_switch
+    cli.run_tmux = fake_run_tmux
+    cli.is_cycle_feedback_enabled = lambda: feedback
+    cli.is_in_tmux = lambda: True
+    return originals, messages, switched
+
+
+def test_cycle_feedback() -> list[TestResult]:
+    """`cmd_cycle` reports the hop's position within the list it actually cycles."""
+    import time
+
+    from . import cli, tmux
+    from .tmux import PaneInfo
+
+    results = []
+    now = int(time.time())
+
+    # Cycle order: waiting newest first (%w3, %w2, %w1), then idle (%i1).
+    panes = [
+        PaneInfo(id="%w1", state="waiting", timestamp=now - 240, cwd="/repo/palm-server",
+                 session="s", window=0, wait_reason="permission", repo="palm-server"),
+        PaneInfo(id="%w2", state="waiting", timestamp=now - 120, cwd="/repo/api",
+                 session="s", window=1, wait_reason="question", repo="api"),
+        PaneInfo(id="%w3", state="waiting", timestamp=now - 60, cwd="/repo/web",
+                 session="s", window=2, wait_reason="plan", repo="web"),
+        PaneInfo(id="%i1", state="idle", timestamp=now - 30, cwd="/repo/docs",
+                 session="s", window=3, repo="docs"),
+    ]
+
+    def run_cycle(pane_set, mode="priority", pane="%w3", dead=(), feedback=True):
+        originals, messages, switched = _patch_cmd_cycle_env(
+            cli, pane_set, dead=dead, feedback=feedback
+        )
+        try:
+            rc = cli.cmd_cycle(argparse.Namespace(pane=pane, mode=mode))
+        finally:
+            for name, value in originals.items():
+                setattr(cli, name, value)
+        return rc, messages, switched
+
+    # Priority mode narrows to the waiting group, so the idle pane is not counted.
+    rc, messages, switched = run_cycle(panes)
+    results.append(TestResult(
+        "cycle_feedback__priority_counts_narrowed_group",
+        rc == 0 and switched == ["%w2"] and len(messages) == 1
+        and messages[0].startswith("[2/3 waiting] api · question · "),
+        f"Expected '[2/3 waiting] api · question · …', got {messages} (switched={switched})",
+    ))
+
+    # Flat mode cycles the whole pending list, so the same hop is 2 of 4.
+    rc, messages, switched = run_cycle(panes, mode="flat")
+    results.append(TestResult(
+        "cycle_feedback__flat_counts_full_pending_list",
+        rc == 0 and switched == ["%w2"] and len(messages) == 1
+        and messages[0].startswith("[2/4 waiting] api · question · "),
+        f"Expected '[2/4 waiting] api · question · …', got {messages} (switched={switched})",
+    ))
+
+    # %w2 vanished mid-cycle: the hop lands on %w1, and the counter describes
+    # the two panes that survived rather than the three originally listed.
+    rc, messages, switched = run_cycle(panes, dead={"%w2"})
+    results.append(TestResult(
+        "cycle_feedback__index_follows_popped_entries",
+        rc == 0 and switched == ["%w1"] and len(messages) == 1
+        and messages[0].startswith("[2/2 waiting] palm-server · permission · "),
+        f"Expected '[2/2 waiting] palm-server · permission · …', got {messages} (switched={switched})",
+    ))
+
+    # An idle pane has no wait reason, so the separator collapses instead of
+    # leaving an empty field between project and age.
+    idle_only = [p for p in panes if p.state == "idle"]
+    rc, messages, switched = run_cycle(idle_only, pane="%i1")
+    msg = messages[0] if messages else ""
+    results.append(TestResult(
+        "cycle_feedback__empty_reason_collapses_separator",
+        rc == 0 and msg.startswith("[1/1 idle] docs · ") and msg.count(" · ") == 1,
+        f"Expected a single separator after 'docs', got {msg!r}",
+    ))
+
+    # @hop-cycle-feedback off restores the silent hop.
+    rc, messages, switched = run_cycle(panes, feedback=False)
+    results.append(TestResult(
+        "cycle_feedback__disabled_stays_silent",
+        rc == 0 and switched == ["%w2"] and messages == [],
+        f"Expected no message when disabled, got {messages}",
+    ))
+
+    # The empty-queue path keeps its own message.
+    rc, messages, switched = run_cycle([])
+    results.append(TestResult(
+        "cycle_feedback__empty_queue_message_unchanged",
+        rc == 0 and messages == ["No notifications"] and switched == [],
+        f"Expected 'No notifications', got {messages}",
+    ))
+
+    # A task summary is appended within the cap.
+    tasked = PaneInfo(id="%t", state="waiting", timestamp=now - 60, cwd="/repo/api",
+                      session="s", window=0, wait_reason="plan", repo="api",
+                      task="x" * (cli.CYCLE_FEEDBACK_TASK_MAX + 20))
+    msg = cli._cycle_feedback_message(tasked, 1, 1)
+    tail = msg.rsplit(cli.CYCLE_FEEDBACK_SEPARATOR, 1)[-1]
+    results.append(TestResult(
+        "cycle_feedback__task_capped",
+        len(tail) == cli.CYCLE_FEEDBACK_TASK_MAX and tail.endswith("…"),
+        f"Expected a task tail capped at {cli.CYCLE_FEEDBACK_TASK_MAX}, got {tail!r}",
+    ))
+
+    # Pane-derived text reaches display-message with its "#" escaped, so tmux
+    # can't read it as a format string.
+    tasked.task = "#{hostile}"
+    msg = cli._cycle_feedback_message(tasked, 1, 1)
+    results.append(TestResult(
+        "cycle_feedback__format_markers_escaped",
+        msg.endswith("##{hostile}") and msg.count("#") == 2,
+        f"Expected an escaped task tail, got {msg!r}",
+    ))
+
+    # The option itself defaults to on and honors an explicit off.
+    original_get_global_option = tmux.get_global_option
+    try:
+        tmux.get_global_option = lambda name, default="": default
+        default_on = tmux.is_cycle_feedback_enabled()
+        tmux.get_global_option = lambda name, default="": "off"
+        explicit_off = tmux.is_cycle_feedback_enabled()
+    finally:
+        tmux.get_global_option = original_get_global_option
+    results.append(TestResult(
+        "cycle_feedback__option_defaults_on",
+        default_on and not explicit_off,
+        f"Expected default on / explicit off, got {default_on} / {explicit_off}",
+    ))
+
+    return results
+
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -2548,6 +2715,7 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_send_prompt_blocks_active_pane())
     all_results.extend(test_conductor_session_excluded())
     all_results.extend(test_spawn_window_session_target_disambiguation())
+    all_results.extend(test_cycle_feedback())
     all_results.extend(validate_hooks_json())
 
     passed = sum(1 for r in all_results if r.passed)

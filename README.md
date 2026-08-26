@@ -92,6 +92,12 @@ set -g @hop-inbox-key 'i'
 # - flat: cycle through all panes in priority order
 set -g @hop-cycle-mode 'priority'
 
+# Cycle feedback (default: on)
+# After each hop, flash your position in the queue plus the pane's project,
+# wait reason, time in state, and task — e.g. "[2/3 waiting] palm-server ·
+# permission · 4m · Refactor auth module".
+# set -g @hop-cycle-feedback 'off'   # Hop silently
+
 # Auto-hop: automatically switch to panes when they enter specific states
 # Disabled by default. Set to comma-separated states to enable.
 set -g @hop-auto 'waiting'           # Auto-switch when a pane needs input
@@ -208,6 +214,17 @@ Controlled by `@hop-cycle-mode` (default: `priority`):
 **Flat mode** (`set -g @hop-cycle-mode 'flat'`):
 - Cycle through all panes in priority order (waiting → idle → active)
 - Within each priority level, newest first
+
+Each hop flashes a line telling you where you landed, so you can tell how much
+of the queue is left without opening the inbox:
+
+```
+[2/3 waiting] palm-server · permission · 4m · Refactor auth module
+```
+
+The counter is scoped to the panes actually being cycled — the current
+priority group in priority mode, the whole pending list in flat mode. Turn it
+off with `set -g @hop-cycle-feedback 'off'`.
 
 ### State Storage
 

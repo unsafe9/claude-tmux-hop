@@ -39,6 +39,7 @@ from .tmux import (
     get_window_states,
     has_hop_state,
     has_session,
+    is_cycle_feedback_enabled,
     is_in_tmux,
     is_window_rename_enabled,
     kill_session_if_exists,
@@ -113,6 +114,11 @@ MAX_NOTIFY_DETAIL = 100  # Maximum detail length in OS notification body
 INBOX_COL_MAX = 56
 INBOX_TASK_MAX = 100
 INBOX_DISPLAY_LIMIT = 20
+
+# Cycle feedback: the transient message shown after each successful hop.
+# The task cap keeps the line inside a narrow status bar.
+CYCLE_FEEDBACK_SEPARATOR = " · "
+CYCLE_FEEDBACK_TASK_MAX = 40
 
 # Global option holding the inbox-clear dismiss stamp: pending panes whose
 # timestamp predates it are hidden from the inbox and cycle until their
@@ -599,6 +605,28 @@ def _pending_panes(panes: list[PaneInfo]) -> list[PaneInfo]:
     return pending
 
 
+def _cycle_feedback_message(pane: PaneInfo, index: int, total: int) -> str:
+    """Render the position line for a hop: "[2/3 waiting] proj · permission · 4m".
+
+    `index` / `total` are 1-based against the list actually being cycled — the
+    top-priority group in priority mode, the whole pending list in flat mode —
+    so the state name in the counter tells which queue is being swept. Fields
+    that don't apply (an idle pane has no wait reason) drop out instead of
+    leaving a dangling separator.
+    """
+    fields = [
+        pane.repo or pane.project,
+        pane.wait_reason,
+        _format_time_ago(pane.timestamp),
+        _format_task_display(pane.task, CYCLE_FEEDBACK_TASK_MAX),
+    ]
+    detail = CYCLE_FEEDBACK_SEPARATOR.join(field for field in fields if field)
+    # tmux expands #(), #{} and #[] inside a display-message body, so
+    # pane-derived text must not reach it as a live format string.
+    detail = detail.replace("#", "##")
+    return f"[{index}/{total} {pane.state}] {detail}".rstrip()
+
+
 @requires_tmux(silent=False)
 def cmd_cycle(args: argparse.Namespace) -> int:
     """Cycle to the next pending pane (priority order)."""
@@ -633,6 +661,14 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         target = entries[next_idx]
         if switch_to_pane(target.id, target.session, target.window):
             log_info(f"cycle → {target.project} ({target.state}) {target.id}")
+            # Vanished panes were already popped out of `entries`, so
+            # next_idx and len(entries) describe the queue that survived.
+            if is_cycle_feedback_enabled():
+                run_tmux(
+                    "display-message",
+                    _cycle_feedback_message(target, next_idx + 1, len(entries)),
+                    check=False,
+                )
             return 0
         # Pane vanished mid-cycle — its options died with it, just skip.
         log_info(f"cycle: skipped vanished {target.id}")
