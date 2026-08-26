@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.6] - 2026-08-26
+
+### Changed
+
+- The inbox preview (`@hop-inbox-preview`) and cycle position feedback
+  (`@hop-cycle-feedback`) are now opt-in, defaulting to off. Both change how
+  long-standing interactions look and feel, so upgrading no longer alters the
+  behavior of an existing setup. Turn either on with `'on'`.
+- The `@hop-status-next` badge takes the pane's state color as foreground and
+  no longer paints a background. Unlike the second status line, which is a list
+  where background pills separate one pane from the next, this badge sits
+  inline among unrelated status segments, where a pill competes with whatever
+  else shares the bar. `@hop-status-next-style` still accepts any tmux style,
+  so `fg=colour235 bg=colour110` restores a pill.
+
 ## [0.8.5] - 2026-08-26
 
 ### Added
