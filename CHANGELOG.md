@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-10-01
+
+### Removed
+
+- The conductor feature is gone: the orchestrator popup (`prefix + y`) and
+  respawn key (`prefix + Y`), the `conductor`, `conductor-context` and
+  `conductor-prompt-context` subcommands, the `@hop-conductor-*` options, and
+  the workbench `CLAUDE.md` instruction management. Remove any
+  `@hop-conductor-*` lines from your tmux config; they are now ignored.
+- Every pane view (cycle, picker, inbox, status, discover) now covers all tmux
+  sessions. A session named `conductor` is no longer excluded.
+
+Routing work to other Claude panes still works without the conductor. The
+`spawn-task`, `send-prompt` and `list --json` commands and the `hop-dispatch`
+skill are unchanged and can be used from any Claude Code session.
+
 ## [0.8.6] - 2026-08-26
 
 ### Changed
