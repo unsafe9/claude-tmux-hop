@@ -9,11 +9,6 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state idle",
             "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "[ \"$CLAUDE_TMUX_HOP_CONDUCTOR\" = 1 ] && ${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop conductor-context || true",
-            "timeout": 10
           }
         ]
       }
@@ -24,11 +19,6 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop register --state active",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "[ \"$CLAUDE_TMUX_HOP_CONDUCTOR\" = 1 ] && ${CLAUDE_PLUGIN_ROOT}/bin/claude-tmux-hop conductor-prompt-context || true",
             "timeout": 10
           }
         ]

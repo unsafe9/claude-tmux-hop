@@ -115,33 +115,13 @@ What the code can't tell you fast. Follow the anchors for behavior.
 - `paths.py:get_tmux_config_paths()`, `get_tpm_plugin_paths()` — covers XDG,
   `~/.tmux.conf`, oh-my-tmux, and TPM (env var or standard locations).
 
-### Conductor (opt-in)
-- Disabled by default (`@hop-conductor-enabled`); while off no keybinding
-  registers and `conductor --popup` refuses. The dispatch primitives
-  (`spawn-task`, `send-prompt`, `list --json`, `--update-instructions`, `--kill`,
-  context hooks) are general and work regardless.
-- Persistent detached session (`@hop-conductor-session`) running `exec claude` —
-  the popup is just a viewer; detach keeps work running; when claude exits the
-  session dies and the next attach recovers. Respawn kills the session first
-  (destructive; required to pick up refreshed instructions). The session name
-  doubles as a filter: its panes are excluded from every pane view.
-- Workbench (`@hop-conductor-dir`) is user-owned — the plugin creates the dir but
-  never seeds a CLAUDE.md. Plugin canon lives in `install.py:CONDUCTOR_INSTRUCTIONS`
-  and, on disk, inside the `<conductor-instructions>` marker that
-  `--update-instructions` replaces; everything outside is preserved. A running
-  claude reads CLAUDE.md once, so instruction changes need a respawn. When the
-  workbench lacks the marker, SessionStart injects canon in-memory and
-  UserPromptSubmit injects a fresh pane snapshot each turn (both no-op outside the
-  workbench and swallow all errors).
-- `CLAUDE_TMUX_HOP_CONDUCTOR=1` is injected at session creation; the conductor
-  hook commands are shell-guarded on it so non-conductor sessions skip the Python
-  interpreter entirely (the cwd check is a second guard).
-- Dispatch: four modes (switch / send-prompt / spawn-task / spawn-task in a fresh
-  worktree). Mode **selection** lives in the conductor instructions; the CLI
-  **shape** lives only in the `hop-dispatch` skill, so flag changes land in one
-  place. `send-prompt` refuses `active` panes unless forced.
-- Anchors: `cli.py:cmd_conductor*()`, `tmux.py:spawn_conductor_session()`,
-  `install.py:update_conductor_instructions()`.
+### Dispatch
+- Primitives `spawn-task`, `send-prompt`, `list --json` route work to other
+  panes in four modes (switch / send-prompt / spawn-task / spawn-task in a fresh
+  worktree). Mode selection and the CLI **shape** live only in the
+  `hop-dispatch` skill, so flag changes land in one place. `send-prompt` refuses
+  `active` panes unless forced.
+- Anchors: `cli.py:cmd_spawn_task()`, `cmd_send_prompt()`, `tmux.py:spawn_window()`.
 
 ### Hooks
 - `hooks/hooks.json` is the source of truth for event → state mapping. Every

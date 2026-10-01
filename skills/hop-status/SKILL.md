@@ -44,7 +44,7 @@ Do **not** trigger for general tmux pane listing, for switching panes (the plugi
 
 ## Structured form (for automated callers)
 
-When a caller needs the raw fields (the conductor agent picking a dispatch target, a script, etc.) — not a human-friendly summary — run `claude-tmux-hop list --json` instead. It emits an array of objects with these keys per pane:
+When a caller needs the raw fields (the `hop-dispatch` skill picking a target, a script, etc.) — not a human-friendly summary — run `claude-tmux-hop list --json` instead. It emits an array of objects with these keys per pane:
 
 - `id` — tmux pane id (`%N`)
 - `state` — `waiting` / `idle` / `active`

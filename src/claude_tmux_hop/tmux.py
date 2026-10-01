@@ -6,7 +6,6 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 from .log import log_debug, log_error, log_info
 
@@ -498,58 +497,6 @@ def spawn_window(
     return window_id
 
 
-def _get_conductor_session() -> str:
-    """Conductor session name (single source for filtering)."""
-    return get_global_option("@hop-conductor-session", "conductor")
-
-
-def _is_conductor_enabled() -> bool:
-    """Whether the conductor feature is enabled via `@hop-conductor-enabled`."""
-    return get_global_option("@hop-conductor-enabled", "off").strip().lower() in TRUTHY_VALUES
-
-
-def resolve_conductor_dir() -> Path:
-    """Resolve the workbench directory (honoring `@hop-conductor-dir`)."""
-    from .paths import get_default_conductor_dir
-
-    custom = get_global_option("@hop-conductor-dir", "")
-    if custom:
-        expanded = os.path.expandvars(os.path.expanduser(custom))
-        return Path(expanded).resolve()
-    return get_default_conductor_dir()
-
-
-def spawn_conductor_session(name: str, workbench: Path, own_bin: Path) -> None:
-    """Create a detached tmux session hosting the conductor `claude`.
-
-    The session's only window runs `exec claude` directly — when claude exits
-    the window closes, the session ends, and the next attach attempt will
-    recreate fresh. Tmux's `-e` flag injects session-scoped env vars that
-    propagate to every shell/pane in the session, so the hook fast-path
-    (`CLAUDE_TMUX_HOP_CONDUCTOR=1`) and the plugin bin (`PATH`) work without
-    a wrapping shell. `PATH` is captured at session-creation time and frozen
-    for the session's lifetime.
-    """
-    current_path = os.environ.get("PATH", "")
-    augmented_path = f"{own_bin}:{current_path}" if current_path else str(own_bin)
-    run_tmux(
-        "new-session", "-d",
-        "-e", "CLAUDE_TMUX_HOP_CONDUCTOR=1",
-        "-e", f"PATH={augmented_path}",
-        "-s", name,
-        "-c", str(workbench),
-        "exec claude",
-    )
-
-
-def kill_session_if_exists(name: str) -> bool:
-    """Kill the named tmux session if it exists. Returns True if killed."""
-    if not has_session(name):
-        return False
-    run_tmux("kill-session", "-t", name, check=False)
-    return True
-
-
 def send_prompt_to_pane(pane_id: str, prompt: str, switch: bool = True) -> None:
     """Inject `prompt` (and Enter) into an existing pane."""
     log_info(f"send-prompt: pane={pane_id} switch={switch}")
@@ -602,10 +549,7 @@ def _interactive_claude_ttys() -> set[str] | None:
 
 
 def _claude_panes_from_ttys(claude_ttys: set[str]) -> list[dict]:
-    """Map ttys hosting interactive Claude Code to their tmux panes.
-
-    Filters out the conductor session — it must never be cycled into.
-    """
+    """Map ttys hosting interactive Claude Code to their tmux panes."""
     output = run_tmux(
         "list-panes",
         "-a",
@@ -613,7 +557,6 @@ def _claude_panes_from_ttys(claude_ttys: set[str]) -> list[dict]:
         "#{pane_id}\t#{pane_tty}\t#{pane_current_path}\t#{session_name}\t#{window_index}",
     )
 
-    conductor_session = _get_conductor_session()
     panes = []
     for line in output.split("\n"):
         if not line:
@@ -624,9 +567,6 @@ def _claude_panes_from_ttys(claude_ttys: set[str]) -> list[dict]:
             continue
 
         pane_id, tty, cwd, session, window_str = parts
-
-        if session == conductor_session:
-            continue
 
         if tty and tty.removeprefix("/dev/") in claude_ttys:
             panes.append({
@@ -678,7 +618,6 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
     """
     # Get running Claude panes for validation
     running_pane_ids = get_running_claude_pane_ids() if validate else None
-    conductor_session = _get_conductor_session()
 
     # Query all panes with hop options
     # Format: pane_id \t state \t timestamp \t cwd \t session \t window
@@ -707,10 +646,6 @@ def get_hop_panes(validate: bool = True) -> list[PaneInfo]:
 
         # Only include panes with hop state
         if not state:
-            continue
-
-        # Conductor session is never part of the hop cycle.
-        if session == conductor_session:
             continue
 
         # Skip stale panes if validating

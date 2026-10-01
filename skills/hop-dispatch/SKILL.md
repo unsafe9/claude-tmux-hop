@@ -1,11 +1,11 @@
 ---
 name: hop-dispatch
-description: Route a natural-language task to a Claude Code pane somewhere in tmux by picking one of four dispatch modes — navigate to an existing pane (`switch`), inject a follow-up prompt into one (`send-prompt`), spawn a new window in the project root (`spawn-task`), or spawn one in a freshly-created git worktree. Use whenever the user wants work to happen in a *different* Claude session than the current one — "이거 새 워크트리 따서 작업", "그 pane 한테 보내줘", "이 검토 다른 세션에서 굴려", "spawn a fresh claude on this", "send this to pane %X", "open a new window for it", "run it in a worktree". Also the surface the conductor popup uses for every dispatch. Only relevant inside a tmux session with the claude-tmux-hop plugin installed.
+description: Route a natural-language task to a Claude Code pane somewhere in tmux by picking one of four dispatch modes — navigate to an existing pane (`switch`), inject a follow-up prompt into one (`send-prompt`), spawn a new window in the project root (`spawn-task`), or spawn one in a freshly-created git worktree. Use whenever the user wants work to happen in a *different* Claude session than the current one — "이거 새 워크트리 따서 작업", "그 pane 한테 보내줘", "이 검토 다른 세션에서 굴려", "spawn a fresh claude on this", "send this to pane %X", "open a new window for it", "run it in a worktree". Only relevant inside a tmux session with the claude-tmux-hop plugin installed.
 ---
 
 # hop-dispatch
 
-Single entry point for routing a task to another Claude Code pane in the user's tmux. The skill picks one of four modes, confirms the plan with the user, and runs the matching `claude-tmux-hop` primitive (`switch`, `send-prompt`, or `spawn-task`). This skill is the **single source of truth** for those primitives' CLI shape — callers (the conductor popup, other agents, even direct user requests) should go through here rather than memorizing flags.
+Single entry point for routing a task to another Claude Code pane in the user's tmux. The skill picks one of four modes, confirms the plan with the user, and runs the matching `claude-tmux-hop` primitive (`switch`, `send-prompt`, or `spawn-task`). This skill is the **single source of truth** for those primitives' CLI shape — callers (other agents, direct user requests) should go through here rather than memorizing flags.
 
 ## When to use
 
@@ -16,16 +16,13 @@ Trigger when the user wants a task to happen *somewhere other than the current s
 - "지금 그 pane 좀 보여줘" / "switch me there" → mode (a)
 - "한 번만 확인할 거니까 새 윈도우에 띄워줘" → mode (c)
 
-You'll get triggered from two main contexts:
-
-- **Conductor popup** (`prefix + y` attaches; `prefix + Y` respawns): a fresh pane snapshot is auto-injected at the top of every turn. Use it directly. The conductor runs in a persistent background tmux session, so detaching the popup (`prefix + d`) does not abort an in-flight dispatch — the conductor keeps running and the user can re-attach later.
-- **Any other Claude session**: no snapshot is pre-injected. Invoke the `hop-status` skill first (or `claude-tmux-hop list --json` directly) so you can see which panes/sessions exist before picking a target.
+No pane snapshot is pre-injected, so invoke the `hop-status` skill first (or `claude-tmux-hop list --json` directly) to see which panes/sessions exist before picking a target.
 
 Do **not** trigger when:
 
 - The user wants the work done *here* in the current session (just do the task).
 - The user wants a status read-out with no routing intent (→ `hop-status` skill).
-- The user wants to configure plugin options or refresh conductor instructions (→ `hop-config` skill).
+- The user wants to configure plugin options (→ `hop-config` skill).
 - The user wants to navigate panes without a task ("그냥 cycle 좀") — they have the plugin's `cycle` / `back` / picker keybindings for that; routing through a dispatch skill is overkill.
 - The plugin isn't installed (`claude-tmux-hop` not on PATH and no plugin bin reachable).
 
@@ -44,9 +41,7 @@ Pick exactly one. Defaults when ambiguous are in the table; otherwise ask.
 
 ## How to run
 
-1. **Get the pane snapshot.**
-   - If the calling context auto-injected one (conductor popup), use it.
-   - Otherwise, invoke the `hop-status` skill — its "Structured form" section will hand you the `list --json` shape with fields `id`, `state`, `cwd`, `session`, `window`, `project`, `branch`, `worktree_root`, `task`.
+1. **Get the pane snapshot.** Invoke the `hop-status` skill — its "Structured form" section will hand you the `list --json` shape with fields `id`, `state`, `cwd`, `session`, `window`, `project`, `branch`, `worktree_root`, `task`.
 
 2. **Pick a mode** using the table above. Resolve the target:
    - For (a) and (b): pick the matching pane's `id` from the snapshot.
@@ -90,15 +85,15 @@ Pick exactly one. Defaults when ambiguous are in the table; otherwise ask.
 
 5. **First prompt** is the user's task verbatim, optionally prefixed with a slash-command (`/review-feature`, `/plan`, etc.) when obviously appropriate. Don't paraphrase the user's request away.
 
-6. **Report the outcome** — what command ran, what the CLI said, where the user can find the new window/pane. The conductor popup stays attached after dispatch (the user detaches manually with `prefix + d`), but they may detach immediately, so put everything they need into one final reply.
+6. **Report the outcome** — what command ran, what the CLI said, where the user can find the new window/pane. Put everything they need into one final reply.
 
 ## Safety rules
 
-- **Never `--force` `send-prompt`** unless the user explicitly tells you to override an active pane in this turn. For conductor popup callers, the user often detaches right after dispatch, so an accidental injection would be effectively irreversible from there.
+- **Never `--force` `send-prompt`** unless the user explicitly tells you to override an active pane in this turn.
 - **Never dispatch silently.** Even if mode selection feels obvious, show the plan and let the user confirm. The cost of a wrong dispatch is a derailed Claude session somewhere else in tmux.
 - **Never create a worktree for mode (d) without the branch name.** If you can't infer a branch from context, ask before running `git worktree add`.
 
 ## Notes
 
 - The command shapes here track the plugin version this file ships with. If a flag here disagrees with `claude-tmux-hop <cmd> --help` at runtime, `--help` wins (you're likely running a different plugin version than this file was written for).
-- This skill is intentionally the leaf node — it executes; it does not call other dispatch-class skills. The caller (conductor instructions, the user's own ask, etc.) is upstream.
+- This skill is intentionally the leaf node — it executes; it does not call other dispatch-class skills. The caller (another agent, the user's own ask, etc.) is upstream.

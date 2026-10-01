@@ -37,9 +37,6 @@ def create_parser(
     cmd_update: CommandHandler,
     cmd_spawn_task: CommandHandler,
     cmd_send_prompt: CommandHandler,
-    cmd_conductor: CommandHandler,
-    cmd_conductor_context: CommandHandler,
-    cmd_conductor_prompt_context: CommandHandler,
 ) -> argparse.ArgumentParser:
     """Create and configure the argument parser.
 
@@ -299,7 +296,7 @@ def create_parser(
     )
     update_parser.set_defaults(func=cmd_update)
 
-    # --- Conductor primitives ---
+    # --- Dispatch primitives ---
 
     spawn_task_parser = subparsers.add_parser(
         "spawn-task",
@@ -338,59 +335,5 @@ def create_parser(
         help="Override the active-pane safety check",
     )
     send_prompt_parser.set_defaults(func=cmd_send_prompt)
-
-    conductor_parser = subparsers.add_parser(
-        "conductor",
-        help="Open the conductor popup (fresh claude in the workbench), or refresh its CLAUDE.md",
-    )
-    conductor_mode_group = conductor_parser.add_mutually_exclusive_group()
-    conductor_mode_group.add_argument(
-        "--popup",
-        dest="mode",
-        action="store_const",
-        const="popup",
-        help="Open the conductor popup (default)",
-    )
-    conductor_mode_group.add_argument(
-        "--update-instructions",
-        dest="mode",
-        action="store_const",
-        const="update_instructions",
-        help="Refresh the plugin-managed instructions in the workbench CLAUDE.md (preserves user content outside the <conductor-instructions> marker)",
-    )
-    conductor_mode_group.add_argument(
-        "--kill",
-        dest="mode",
-        action="store_const",
-        const="kill",
-        help="Kill the conductor tmux session if it exists (idempotent — no-op if not running)",
-    )
-    conductor_parser.add_argument(
-        "--respawn",
-        action="store_true",
-        default=False,
-        help="With --popup, kill any existing conductor session before attaching (fresh claude, destructive of in-flight state)",
-    )
-    conductor_parser.add_argument(
-        "--force",
-        action="store_true",
-        default=False,
-        help="With --update-instructions, overwrite a CLAUDE.md that has no conductor marker (backs up old to CLAUDE.md.bak)",
-    )
-    conductor_parser.set_defaults(mode="popup", func=cmd_conductor)
-
-    # conductor-context (internal — invoked by SessionStart hook)
-    conductor_context_parser = subparsers.add_parser(
-        "conductor-context",
-        help="Emit SessionStart context JSON when running inside the conductor workbench (internal)",
-    )
-    conductor_context_parser.set_defaults(func=cmd_conductor_context)
-
-    # conductor-prompt-context (internal — invoked by UserPromptSubmit hook)
-    conductor_prompt_context_parser = subparsers.add_parser(
-        "conductor-prompt-context",
-        help="Emit UserPromptSubmit context JSON (fresh pane snapshot) when running inside the conductor workbench (internal)",
-    )
-    conductor_prompt_context_parser.set_defaults(func=cmd_conductor_prompt_context)
 
     return parser

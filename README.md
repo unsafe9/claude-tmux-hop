@@ -17,7 +17,6 @@ Quickly hop between Claude Code sessions running in tmux panes.
 - **Status bar integration**: Show pane counts with customizable icons
 - **Popup picker**: Interactive fzf-based picker with time-in-state display (requires fzf)
 - **Window auto-rename**: Optionally rename windows to `<state-icon> <directory name>` so state stays visible at a glance
-- **Conductor** (opt-in): A persistent orchestrator Claude session in a popup that dispatches tasks to your other panes
 - **Claude Code skills**: `hop-status` (session overview), `hop-config` (inspect/edit options), `hop-dispatch` (route a task to another pane)
 
 ## Requirements
@@ -57,8 +56,6 @@ Any existing Claude Code sessions will be automatically discovered and registere
 | `prefix + C-f` | Open picker menu |
 | `prefix + i` | Open notification inbox (fzf popup, menu fallback) |
 | `C-Space` | Jump back to previous pane (no prefix) |
-| `prefix + y` | Open conductor popup (only when conductor is enabled) |
-| `prefix + Y` | Respawn conductor and open popup (only when conductor is enabled) |
 
 ### Configuration
 
@@ -176,13 +173,6 @@ set -g status-right '#{E:@hop-status} | %H:%M'
 # icon shows the highest-priority state among them. When a session ends, the
 # directory name stays as the window label and only the icon is dropped.
 set -g @hop-window-rename 'on'
-
-# Conductor (default: off) - see the Conductor section below
-set -g @hop-conductor-enabled 'on'
-# set -g @hop-conductor-popup-key 'y'    # Attach conductor popup (prefix binding)
-# set -g @hop-conductor-respawn-key 'Y'  # Kill + respawn conductor (prefix binding)
-# set -g @hop-conductor-session 'conductor'  # Background session name
-# set -g @hop-conductor-dir '~/.config/claude-tmux-hop/conductor/'  # Workbench dir
 ```
 
 ### CLI Commands
@@ -383,37 +373,6 @@ Supported terminals include:
 - **Linux**: gnome-terminal, Konsole, Alacritty, kitty, Tilix, Terminator
 - **Windows**: Windows Terminal, ConEmu, Cmder
 
-## Conductor (Opt-in)
-
-The conductor is an orchestrator Claude Code session that lives in a
-persistent background tmux session and dispatches work to your other panes.
-Disabled by default:
-
-```bash
-set -g @hop-conductor-enabled 'on'
-```
-
-- `prefix + y` opens a popup attached to the conductor session (created on
-  demand). `prefix + d` inside the popup detaches **without killing Claude** —
-  anything in-flight keeps running in the background, and reopening the popup
-  re-attaches to the same session.
-- `prefix + Y` kills the conductor session first and attaches to a fresh
-  Claude (destructive to in-flight work).
-- The conductor sees a live snapshot of all tracked panes (state, project,
-  branch, current task) on every prompt, and routes each task using one of
-  four dispatch modes: switch to an existing pane, inject a prompt into one
-  (`send-prompt`), spawn a new window in the project root (`spawn-task`), or
-  spawn into a freshly created git worktree.
-- The conductor works from a workbench directory (`@hop-conductor-dir`,
-  default `~/.config/claude-tmux-hop/conductor/`). Its instructions are
-  injected automatically; to persist them into the workbench `CLAUDE.md`
-  (and customize around them), run the `hop-config` skill's "update conductor
-  instructions" action.
-
-The same dispatch modes are available outside the conductor via the
-`hop-dispatch` skill in any Claude Code session — e.g. "spawn a fresh claude
-on this in a worktree".
-
 ## Claude Code Skills
 
 The plugin ships three skills, available in any Claude Code session:
@@ -421,7 +380,7 @@ The plugin ships three skills, available in any Claude Code session:
 | Skill | Purpose |
 |-------|---------|
 | `hop-status` | Summarize all tracked Claude sessions and their states |
-| `hop-config` | Inspect and persistently edit `@hop-*` tmux options; update conductor instructions |
+| `hop-config` | Inspect and persistently edit `@hop-*` tmux options |
 | `hop-dispatch` | Route a task to another Claude pane (switch / send-prompt / spawn-task / spawn-with-worktree) |
 
 ## License
