@@ -123,6 +123,19 @@ What the code can't tell you fast. Follow the anchors for behavior.
   `active` panes unless forced.
 - Anchors: `cli.py:cmd_spawn_task()`, `cmd_send_prompt()`, `tmux.py:spawn_window()`.
 
+### Program status
+- Claude Code that supports program status emits OSC 7501. Inside tmux the probe is answered by
+  the PTY proxy on `default-command`, not by the outer terminal and not by
+  `pipe-pane`: tmux replies to device attributes before a pipe reader can
+  answer, and Claude treats that reply as "unsupported".
+- `@hop-psp=1` is set only after a real `app=claude-code` report. Until
+  then `cmd_register` still owns the pane, so a version number alone never
+  turns the hooks off. `clear` removes the flag with the other pane options.
+- Root and child records reduce to one hop state: blocked, then working,
+  then done/error, then idle. `cmd_register` does not notify again while
+  the flag is set.
+- Anchors: `psp.py`, `proxy.py`, `cli.py:apply_program_status()`.
+
 ### Hooks
 - `hooks/hooks.json` is the source of truth for event → state mapping. Every
   command carries `timeout: 10` so a hung tmux can't block Claude for the 60s

@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 
 from .log import log_debug, log_error, log_info
+from .psp import PSP_OPTION
 
 # Dialog detection constants
 PROMPT_CHAR = "❯"  # Claude Code input prompt / Ink selection cursor (U+276F)
@@ -252,7 +253,7 @@ def clear_pane_state(pane_id: str | None = None) -> None:
     target = _pane_target_args(pane_id)
     options = ("@hop-state", "@hop-timestamp", "@hop-task",
                "@hop-wait-reason", "@hop-last-notify",
-               "@hop-project", "@hop-branch")
+               "@hop-project", "@hop-branch", PSP_OPTION)
     args: list[str] = []
     for opt in options:
         if args:

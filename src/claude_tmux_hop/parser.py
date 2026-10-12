@@ -37,6 +37,7 @@ def create_parser(
     cmd_update: CommandHandler,
     cmd_spawn_task: CommandHandler,
     cmd_send_prompt: CommandHandler,
+    cmd_psp_proxy: CommandHandler,
 ) -> argparse.ArgumentParser:
     """Create and configure the argument parser.
 
@@ -335,5 +336,12 @@ def create_parser(
         help="Override the active-pane safety check",
     )
     send_prompt_parser.set_defaults(func=cmd_send_prompt)
+
+    proxy_parser = subparsers.add_parser(
+        "psp-proxy",
+        help="Run a command on a PTY that understands program status",
+    )
+    proxy_parser.add_argument("command", nargs=argparse.REMAINDER)
+    proxy_parser.set_defaults(func=cmd_psp_proxy)
 
     return parser

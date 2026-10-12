@@ -851,6 +851,7 @@ def _build_full_parser():
         cmd_update=noop,
         cmd_spawn_task=noop,
         cmd_send_prompt=noop,
+        cmd_psp_proxy=noop,
     )
 
 
@@ -2340,6 +2341,171 @@ def test_tmux_format_escaping() -> list[TestResult]:
     return results
 
 
+
+def test_program_status() -> list[TestResult]:
+    """OSC 7501 parsing, record replacement, and the one-state pane reduction."""
+    import base64
+
+    from .psp import FullReset, Ledger, Parser, Query, Report, ShellPrompt
+
+    results = []
+
+    def drive(chunks: list[bytes], ledger: Ledger | None = None) -> tuple[Ledger, list]:
+        store = ledger or Ledger()
+        seen = []
+        parser = Parser()
+        for chunk in chunks:
+            for event in parser.feed(chunk):
+                seen.append(event)
+                store.apply(event)
+        return store, seen
+
+    def osc(body: str, end: bytes = bytes((7,))) -> bytes:
+        return bytes((0x1B, 0x5D)) + b"7501;" + body.encode() + end
+
+    raw = osc("state=working:app=claude-code")
+    store, seen = drive([raw[:8], raw[8:]])
+    results.append(TestResult(
+        "psp_split_report",
+        len(seen) == 1 and isinstance(seen[0], Report) and store.snapshot().state == "active",
+        f"seen={seen!r} snap={store.snapshot()!r}",
+    ))
+
+    store, seen = drive([osc("?")])
+    results.append(TestResult(
+        "psp_bare_probe",
+        len(seen) == 1 and isinstance(seen[0], Query) and store.snapshot().state == "",
+        f"seen={seen!r}",
+    ))
+
+    _, seen = drive([osc("? : states=idle")])
+    results.append(TestResult(
+        "psp_ignores_capability_reply",
+        seen == [],
+        f"seen={seen!r}",
+    ))
+
+    msg = base64.b64encode(b"Apply now").decode()
+    store, _seen = drive([osc(f"state=blocked:kind=permission:app=claude-code:msg={msg}:title=aaaa")])
+    store, _seen = drive(
+        [osc("state=blocked:kind=permission:app=claude-code:msg=" + msg)],
+        store,
+    )
+    snap = store.snapshot()
+    results.append(TestResult(
+        "psp_report_replaces_record",
+        snap.state == "waiting" and snap.reason == "permission" and snap.task == "Apply now",
+        f"snap={snap!r}",
+    ))
+
+    idle = Ledger()
+    drive([osc("state=idle:app=claude-code")], idle)
+    before = idle.snapshot()
+    drive([osc("state=working:id=bad/:app=claude-code")], idle)
+    results.append(TestResult(
+        "psp_bad_id_keeps_root",
+        idle.snapshot() == before and before.state == "idle",
+        f"before={before!r} after={idle.snapshot()!r}",
+    ))
+
+    bad = base64.b64encode(b"hello\n").decode()
+    kept = Ledger()
+    drive([osc("state=idle:app=claude-code")], kept)
+    drive([osc(f"state=working:app=claude-code:msg={bad}")], kept)
+    results.append(TestResult(
+        "psp_control_text_discards_report",
+        kept.snapshot().state == "idle",
+        f"snap={kept.snapshot()!r}",
+    ))
+
+    mixed = Ledger()
+    drive([osc("state=working:app=claude-code")], mixed)
+    drive([osc("state=blocked:kind=question:id=worker")], mixed)
+    results.append(TestResult(
+        "psp_child_blocked_outranks_root",
+        mixed.snapshot().state == "waiting" and mixed.snapshot().reason == "question",
+        f"snap={mixed.snapshot()!r}",
+    ))
+
+    done = Ledger()
+    drive([osc("state=done:app=claude-code"), osc("state=working:id=worker:app=claude-code")], done)
+    prompt = bytes((0x1B, 0x5D)) + b"133;A" + bytes((7,))
+    redraw = bytes((0x1B, 0x5D)) + b"133;A;redraw=0" + bytes((7,))
+    drive([redraw], done)
+    after_redraw = done.snapshot().state
+    drive([prompt], done)
+    results.append(TestResult(
+        "psp_shell_prompt_drops_working_only",
+        after_redraw == "active" and done.snapshot().state == "idle",
+        f"redraw={after_redraw!r} prompt={done.snapshot()!r}",
+    ))
+
+    cleared = Ledger()
+    drive([
+        osc("state=working:app=claude-code"),
+        osc("state=idle:id=build/test:app=claude-code"),
+        osc("state=clear:id=build"),
+    ], cleared)
+    results.append(TestResult(
+        "psp_clear_removes_descendants",
+        cleared.snapshot().state == "active",
+        f"snap={cleared.snapshot()!r}",
+    ))
+
+    reset = Ledger()
+    drive([osc("state=idle:app=claude-code"), bytes((0x1B, ord("c")))], reset)
+    results.append(TestResult(
+        "psp_full_reset_clears",
+        reset.snapshot().state == "" and any(isinstance(event, FullReset) for _store_events in [True] for event in Parser().feed(bytes((0x1B, ord("c"))))),
+        f"snap={reset.snapshot()!r}",
+    ))
+
+    unknown = Ledger()
+    drive([osc("state=idle:app=claude-code:widget=1")], unknown)
+    results.append(TestResult(
+        "psp_unknown_key_ignored",
+        unknown.snapshot().state == "idle",
+        f"snap={unknown.snapshot()!r}",
+    ))
+
+    other = Ledger()
+    drive([osc("state=working:app=terraform")], other)
+    results.append(TestResult(
+        "psp_other_app_ignored",
+        other.snapshot().state == "",
+        f"snap={other.snapshot()!r}",
+    ))
+
+    del ShellPrompt
+    return results
+
+
+def test_register_yields_when_psp_owns_pane() -> list[TestResult]:
+    """Hook registration must not move a pane that program status already owns."""
+    import os
+
+    from . import cli
+
+    previous = os.environ.get("TMUX")
+    os.environ["TMUX"] = previous or "/tmp/tmux-psp-test"
+    calls: list = []
+    original_option = cli.get_pane_option
+    original_set = cli.set_pane_state
+    cli.get_pane_option = lambda name, pane_id=None: "1" if name == "@hop-psp" else ""
+    cli.set_pane_state = lambda *args, **kwargs: calls.append((args, kwargs)) or False
+    try:
+        rc = cli.cmd_register(argparse.Namespace(state="idle", reason="", task=None))
+        passed = rc == 0 and calls == []
+        message = f"rc={rc} calls={calls!r}"
+    finally:
+        cli.get_pane_option = original_option
+        cli.set_pane_state = original_set
+        if previous is None:
+            os.environ.pop("TMUX", None)
+        else:
+            os.environ["TMUX"] = previous
+    return [TestResult("register_yields_to_psp", passed, message)]
+
 def run_all_tests() -> tuple[list[TestResult], int, int]:
     """Run all tests and return (results, passed, failed)."""
     all_results: list[TestResult] = []
@@ -2378,6 +2544,8 @@ def run_all_tests() -> tuple[list[TestResult], int, int]:
     all_results.extend(test_cycle_feedback())
     all_results.extend(test_tmux_format_escaping())
     all_results.extend(validate_hooks_json())
+    all_results.extend(test_program_status())
+    all_results.extend(test_register_yields_when_psp_owns_pane())
 
     passed = sum(1 for r in all_results if r.passed)
     failed = len(all_results) - passed

@@ -168,6 +168,22 @@ main() {
     # Wrapper script uses local project via PYTHONPATH
     local cmd="$CURRENT_DIR/bin/claude-tmux-hop"
 
+    # New panes run under the program-status proxy. tmux answers device
+    # attributes before a pane pipe can reply to OSC 7501, so the proxy
+    # answers on the inner PTY. Existing panes are left alone.
+    local current_command
+    current_command=$(get_tmux_option "default-command" "")
+    case "$current_command" in
+        *psp-proxy*) ;;
+        *)
+            if [[ -z "$current_command" ]]; then
+                current_command=$(get_tmux_option "default-shell" "${SHELL:-/bin/zsh}")
+            fi
+            tmux set-option -g @hop-saved-default-command "$current_command"
+            tmux set-option -g default-command "$cmd psp-proxy -- $current_command"
+            ;;
+    esac
+
     # Build cycle command with mode flag
     local cycle_args="--pane '#{pane_id}' --mode '$cycle_mode'"
 

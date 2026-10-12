@@ -15,6 +15,8 @@ from pathlib import Path
 from .log import LOG_DIR, log_cli_call, log_debug, log_error, log_info
 from .notify import PaneContext, clear_notification_stamp, handle_state_notifications
 from .parser import create_parser
+from .proxy import run_proxy
+from .psp import PSP_OPTION, Snapshot
 from .priority import (
     PENDING_STATES,
     STATE_PRIORITY,
@@ -46,7 +48,9 @@ from .tmux import (
     run_tmux,
     send_prompt_to_pane,
     set_global_option,
+    get_pane_option,
     set_pane_git_identity,
+    set_pane_option,
     set_pane_state,
     set_pane_task,
     spawn_window,
@@ -464,6 +468,11 @@ def cmd_register(args: argparse.Namespace) -> int:
     """Register the current pane with a state."""
     reason = getattr(args, "reason", "") or ""
     log_cli_call("register", {"state": args.state, "reason": reason})
+    # A real program-status report owns the pane. Hooks stay installed so
+    # older Claude, and a pane that never reports, keep this path.
+    if get_pane_option(PSP_OPTION) == "1":
+        log_info("register: pane is owned by program status")
+        return 0
     state_changed = set_pane_state(args.state, reason=reason)
     log_info(f"register: state set to {args.state}")
 
@@ -1371,6 +1380,71 @@ def cmd_send_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pane_cwd(pane_id: str) -> str:
+    """Directory the pane is in now, not the proxy process's start directory."""
+    try:
+        path = run_tmux("display-message", "-p", "-t", pane_id, "#{pane_current_path}")
+    except RuntimeError:
+        return os.getcwd()
+    return path or os.getcwd()
+
+
+def apply_program_status(snapshot: Snapshot) -> None:
+    """Publish one reduced program-status view through the existing pane options."""
+    pane_id = os.environ.get("TMUX_PANE")
+    if not pane_id:
+        return
+    if not snapshot.state:
+        clear_pane_state(pane_id)
+        log_info(f"psp: {pane_id} cleared")
+        return
+
+    set_pane_option(PSP_OPTION, "1", pane_id)
+    reason = snapshot.reason if snapshot.state == "waiting" else ""
+    state_changed = set_pane_state(snapshot.state, pane_id, reason)
+    task = _normalize_task(snapshot.task) if snapshot.task else ""
+    if task:
+        try:
+            set_pane_task(task, pane_id)
+        except RuntimeError as exc:
+            log_debug(f"psp: set_pane_task failed: {exc}")
+
+    cwd = _pane_cwd(pane_id)
+    project = os.path.basename(cwd) or "unknown"
+    if is_window_rename_enabled():
+        icon = _get_state_icon(_best_window_state(get_window_states(pane_id), snapshot.state))
+        rename_window(f"{icon} {project}" if icon else project, pane_id)
+
+    if snapshot.state == "active":
+        clear_notification_stamp(pane_id)
+
+    pane_context = _build_pane_context(project)
+    if snapshot.state in PENDING_STATES:
+        branch, repo = get_git_identity(cwd)
+        set_pane_git_identity(repo, branch, pane_id)
+
+    detail = ""
+    if snapshot.state in PENDING_STATES and task:
+        detail = _format_task_display(task, MAX_NOTIFY_DETAIL)
+    handle_state_notifications(
+        snapshot.state, project, pane_context, detail, allow_focus=state_changed
+    )
+    if state_changed and should_auto_hop(snapshot.state):
+        do_auto_hop(pane_context)
+    log_info(f"psp: {pane_id} -> {snapshot.state}")
+
+
+def cmd_psp_proxy(args: argparse.Namespace) -> int:
+    """Run a command with the program-status PTY proxy."""
+    command = list(args.command)
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        print("Error: psp-proxy requires a command", file=sys.stderr)
+        return 2
+    return run_proxy(command, apply_program_status)
+
+
 def main() -> int:
     """Main entry point."""
     parser = create_parser(
@@ -1393,6 +1467,7 @@ def main() -> int:
         cmd_update=cmd_update,
         cmd_spawn_task=cmd_spawn_task,
         cmd_send_prompt=cmd_send_prompt,
+        cmd_psp_proxy=cmd_psp_proxy,
     )
     args = parser.parse_args()
     return args.func(args)

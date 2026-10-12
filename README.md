@@ -11,6 +11,7 @@ Quickly hop between Claude Code sessions running in tmux panes.
 - **Terminal focus**: Automatically bring terminal to foreground when panes need attention (macOS/Linux/Windows)
 - **Notification inbox**: Browse panes waiting for input or sitting idle in an fzf popup and jump to them
 - **Auto-registration**: Claude Code hooks automatically track pane states, wait reasons, and task summaries
+- **Program status**: Claude Code that emits OSC 7501 reports through that protocol. Older releases keep using hooks
 - **Auto-discovery**: Existing Claude Code sessions are detected on plugin load
 - **In-memory state**: Pane state lives in tmux pane options - auto-cleanup when panes close
 - **Cross-session navigation**: Works across all tmux sessions
@@ -45,6 +46,8 @@ set -g @plugin 'unsafe9/claude-tmux-hop'
 Then press `prefix + I` to install.
 
 Any existing Claude Code sessions will be automatically discovered and registered as `idle` on plugin load.
+
+New panes created after the plugin loads run inside a PTY proxy. The proxy answers Claude's program-status probe on that pane, including panes that are hidden or not focused, and hop treats those reports as the pane's state. Hooks remain installed. They keep updating a pane until a report arrives, and they remain the only source for Claude versions that do not ask. The previous `default-command` is saved in `@hop-saved-default-command`.
 
 ## Usage
 
