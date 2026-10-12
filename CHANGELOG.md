@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-10-12
+
+### Added
+
+- Claude Code that emits OSC 7501 now owns the pane state. New panes run under a PTY proxy, which answers the program-status probe inside tmux, including panes that are hidden or not focused. A blocked report becomes waiting, working becomes active, and done, error, or idle becomes idle.
+- `@hop-psp` marks a pane that has accepted a program-status report. Hooks stay installed and keep updating a pane until that report arrives. Afterward, hook registration does not change the pane, and `clear` removes the flag with the other pane options.
+- The previous `default-command` is kept in `@hop-saved-default-command`. Panes that already exist keep using hooks until they are recreated.
+
 ## [0.9.0] - 2026-10-01
 
 ### Removed
